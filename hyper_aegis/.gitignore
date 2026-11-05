@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+state/*
+!state/.gitkeep
+logs/*
+!logs/.gitkeep
+tax_ledger.csv
