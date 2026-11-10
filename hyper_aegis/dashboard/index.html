@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperAegis</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#14181f; --mute:#667085; --line:#e4e7ec; --up:#0f9d58; --down:#d93025; --accent:#2f5bea; --warn:#b26a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e1116; --card:#161b22; --ink:#e6e9ee; --mute:#8b96a5; --line:#262d37; --up:#3ecf8e; --down:#ff6b6b; --accent:#7aa2ff; --warn:#f0b429; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:20px 16px 48px; }
+  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:0 0 10px; font-weight:600; }
+  .pill { font-size:12px; padding:2px 9px; border-radius:99px; border:1px solid var(--line); color:var(--mute); }
+  .pill.ok { color:var(--up); border-color:var(--up); } .pill.bad { color:var(--down); border-color:var(--down); } .pill.warn { color:var(--warn); border-color:var(--warn); }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .k { color:var(--mute); font-size:12px; } .v { font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .sub { color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  section { margin-top:12px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--mute); font-weight:500; font-size:12px; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:7px 10px 7px 0; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .empty { color:var(--mute); padding:8px 0; }
+  .feed { display:flex; flex-direction:column; gap:10px; }
+  .item { border-left:3px solid var(--line); padding-left:10px; }
+  .item.ok { border-color:var(--up); } .item.veto { border-color:var(--warn); } .item.crit { border-color:var(--down); }
+  .item p { margin:2px 0 0; color:var(--mute); white-space:normal; }
+  svg { width:100%; height:240px; display:block; }
+  .cols { display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width: 900px) { .cols { grid-template-columns:1fr 1fr; } }
+  footer { color:var(--mute); font-size:12px; margin-top:18px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>HyperAegis</h1>
+    <span id="mode" class="pill">…</span>
+    <span id="status" class="pill">…</span>
+    <span id="hm" class="pill" hidden>House Money</span>
+    <span class="sub" id="updated" style="margin-left:auto"></span>
+  </header>
+
+  <div class="grid" id="cards"></div>
+
+  <section class="card">
+    <h2>Evolución del capital</h2>
+    <svg id="chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Evolución del capital"></svg>
+  </section>
+
+  <section class="card">
+    <h2>Posiciones abiertas</h2>
+    <div class="scroll" id="positions"></div>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <h2>Señales y veredicto de Claude</h2>
+      <div class="feed" id="decisions"></div>
+    </section>
+    <section class="card">
+      <h2>Incidentes del vigilante</h2>
+      <div class="feed" id="incidents"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Operaciones cerradas</h2>
+    <div class="scroll" id="trades"></div>
+  </section>
+
+  <section class="card">
+    <h2>Mercado vigilado</h2>
+    <div class="sub" id="market"></div>
+  </section>
+
+  <footer>Panel de solo lectura. Desde aquí no se puede operar ni mover fondos.</footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 2) => n == null || isNaN(n) ? "–" : Number(n).toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
+const px = n => n == null ? "–" : Number(n).toPrecision(6).replace(/\.?0+$/, "");
+const sign = n => (n > 0 ? "+" : "") + fmt(n);
+const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
+const when = s => s ? new Date(s).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === "class" ? e.className = v : e.setAttribute(k, v);
+  for (const kid of kids) e.append(kid instanceof Node ? kid : document.createTextNode(kid ?? ""));
+  return e;
+}
+function table(host, head, rows, empty) {
+  host.replaceChildren();
+  if (!rows.length) { host.append(el("div", { class: "empty" }, empty)); return; }
+  const t = el("table");
+  t.append(el("tr", {}, ...head.map(h => el("th", {}, h))));
+  for (const r of rows) t.append(el("tr", {}, ...r.map(c => c instanceof Node ? c : el("td", {}, c))));
+  host.append(t);
+}
+const td = (text, c = "") => el("td", { class: c }, text);
+
+function card(k, v, sub, c = "") {
+  return el("div", { class: "card" }, el("div", { class: "k" }, k), el("div", { class: "v " + c }, v), el("div", { class: "sub" }, sub || ""));
+}
+
+function chart(points, base) {
+  const svg = $("chart"); svg.replaceChildren();
+  const NS = "http://www.w3.org/2000/svg";
+  const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  if (points.length < 2) {
+    const t = mk("text", { x: 500, y: 125, "text-anchor": "middle", fill: "var(--mute)", "font-size": 14 });
+    t.textContent = "Aún no hay historial suficiente"; svg.append(t); return;
+  }
+  const ys = points.map(p => p[1]).concat(base);
+  let lo = Math.min(...ys), hi = Math.max(...ys); const pad = (hi - lo || 1) * 0.12; lo -= pad; hi += pad;
+  const t0 = points[0][0], t1 = points[points.length - 1][0];
+  const X = t => 8 + (t - t0) / (t1 - t0 || 1) * 984, Y = v => 232 - (v - lo) / (hi - lo) * 224;
+  const last = points[points.length - 1][1], color = last >= base ? "var(--up)" : "var(--down)";
+  const d = points.map((p, i) => (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" ");
+  svg.append(mk("line", { x1: 8, x2: 992, y1: Y(base), y2: Y(base), stroke: "var(--mute)", "stroke-dasharray": "4 5", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+  svg.append(mk("path", { d: d + ` L ${X(t1)} 232 L ${X(t0)} 232 Z`, fill: color, opacity: .08 }));
+  svg.append(mk("path", { d, fill: "none", stroke: color, "stroke-width": 2, "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round" }));
+}
+
+function render(s) {
+  const eur = s.eur_per_usd || 0, toEur = v => eur ? `${fmt(v * eur)} €` : "";
+  $("mode").textContent = s.mode === "live" ? "REAL" : "SIMULACIÓN"; $("mode").className = "pill " + (s.mode === "live" ? "warn" : "");
+  $("status").textContent = s.status.label; $("status").className = "pill " + s.status.level;
+  $("hm").hidden = !s.house_money;
+  $("updated").textContent = "Actualizado " + new Date(s.updated).toLocaleTimeString("es-ES");
+  const pnl = s.equity - s.initial_capital, pct = pnl / s.initial_capital * 100;
+  $("cards").replaceChildren(
+    card("Capital", fmt(s.equity) + " USDC", toEur(s.equity)),
+    card("Resultado total", sign(pnl) + " USDC", `${sign(pct)} % · ${toEur(pnl)}`, cls(pnl)),
+    card("Hoy", sign(s.day_pnl) + " USDC", `caída del día ${fmt(s.daily_drawdown * 100)} % (límite ${fmt(s.daily_limit * 100, 0)} %)`, cls(s.day_pnl)),
+    card("Riesgo abierto", fmt(s.open_risk) + " USDC", `${s.positions.length} de ${s.max_positions} posiciones`),
+    card("Operaciones", String(s.stats.closed), `${fmt(s.stats.win_rate, 0)} % ganadoras · neto ${sign(s.stats.net_pnl)} USDC`),
+  );
+  chart(s.equity_history.map(p => [new Date(p[0]).getTime(), p[1]]), s.initial_capital);
+
+  table($("positions"), ["Activo", "Lado", "Tamaño", "Entrada", "Precio", "Stop", "Resultado", "En R", "Abierta"],
+    s.positions.map(p => [p.coin, td(p.side, p.side === "LONG" ? "up" : "down"), fmt(p.size, 4), px(p.entry), px(p.mark), px(p.stop),
+      td(sign(p.upnl) + " USDC", cls(p.upnl)), td(sign(p.r) + "R", cls(p.r)), when(p.opened)]),
+    "Sin posiciones abiertas.");
+
+  table($("trades"), ["Cierre", "Activo", "Lado", "Entrada", "Salida", "Neto USDC", "Neto €", "Motivo"],
+    s.trades.map(t => [when(t.close_time_utc), t.coin, td(t.side, t.side === "LONG" ? "up" : "down"), px(t.entry_px_usd), px(t.exit_px_usd),
+      td(sign(+t.net_pnl_usd), cls(+t.net_pnl_usd)), td(sign(+t.net_pnl_eur), cls(+t.net_pnl_eur)), t.close_reason]),
+    "Todavía no se ha cerrado ninguna operación.");
+
+  const dec = $("decisions"); dec.replaceChildren();
+  if (!s.decisions.length) dec.append(el("div", { class: "empty" }, "Sin señales todavía. En velas diarias es normal pasar días sin ninguna."));
+  for (const d of s.decisions) dec.append(el("div", { class: "item " + (d.outcome === "ejecutada" ? "ok" : d.outcome === "vetada" ? "veto" : "") },
+    el("strong", {}, `${d.coin} ${d.side} · ${d.outcome}`), el("span", { class: "sub" }, "  " + when(d.ts)),
+    el("p", {}, `${d.strategies.join(", ")}${d.claude ? " — Claude: " + d.claude : ""}`)));
+
+  const inc = $("incidents"); inc.replaceChildren();
+  if (!s.incidents.length) inc.append(el("div", { class: "empty" }, "Ningún incidente."));
+  for (const i of s.incidents) inc.append(el("div", { class: "item " + (i.severity === "aviso" ? "veto" : "crit") },
+    el("strong", {}, i.kind.replaceAll("_", " ")), el("span", { class: "sub" }, "  " + when(i.ts)),
+    el("p", {}, i.detail + " → " + i.action), i.diagnosis ? el("p", {}, "Claude: " + i.diagnosis) : ""));
+
+  const m = s.market;
+  $("market").textContent = m.total ? `${m.total} activos · ${m.alcista} en tendencia alcista · ${m.bajista} bajista · ${m.lateral} lateral · último escaneo ${when(m.last_scan)}` : "Esperando el primer escaneo…";
+}
+
+async function tick() {
+  try { render(await (await fetch("/api/state", { cache: "no-store" })).json()); }
+  catch (e) { $("status").textContent = "sin conexión con el bot"; $("status").className = "pill bad"; }
+}
+tick(); setInterval(tick, 10000);
+</script>
+</body>
+</html>

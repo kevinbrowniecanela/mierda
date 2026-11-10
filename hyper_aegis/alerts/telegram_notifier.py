@@ -90,13 +90,13 @@ class TelegramNotifier:
             f"Watchlist ({len(watchlist)}): {esc(', '.join(watchlist))}"
         )
 
-    def entry(self, coin: str, is_long: bool, size: float, price: float, stop: float, tp1: float,
-              risk_usd: float, confidence: int, setup: str, thesis: str) -> None:
+    def entry(self, coin: str, is_long: bool, size: float, price: float, stop: float,
+              risk_usd: float, setup: str, verdict: str) -> None:
         arrow = "🟢 LONG" if is_long else "🔴 SHORT"
         self.send(
             f"{arrow} <b>{esc(coin)}</b>\nEntrada: {price:g} | Tamaño: {size:g}\n"
-            f"SL: {stop:g} | TP1 (1.5R): {tp1:g}\nRiesgo: {risk_usd:.2f} USDC | Conf: {confidence}% | {esc(setup)}\n"
-            f"<i>{esc(thesis[:600])}</i>"
+            f"Stop inicial: {stop:g} (trailing ATR) | Riesgo: {risk_usd:.2f} USDC\nSeñal: {esc(setup)}\n"
+            f"<i>Claude: {esc(verdict[:600])}</i>"
         )
 
     def tp1(self, coin: str, closed_size: float, price: float, pnl_usd: float, new_stop: float) -> None:

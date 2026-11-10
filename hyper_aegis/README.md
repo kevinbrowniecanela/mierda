@@ -1,43 +1,85 @@
 # 🛡️ HyperAegis
 
-Bot de trading algorítmico para **Futuros Perpetuos en Hyperliquid**, con arquitectura de 2 fases:
+Bot de trading algorítmico para **Futuros Perpetuos en Hyperliquid** (cripto y, en el mismo exchange,
+oro, índices y acciones). Opera en **velas diarias**:
 
-1. **Fase 1, filtro cuantitativo** (Python, sin coste de IA): escanea cada 60 s la watchlist dinámica
-   (Top 20 por volumen + Top 5 movers) y puntúa anomalías: spike de volumen, expansión de rango vs ATR,
-   cambio de Open Interest, funding extremo, desequilibrio del libro L2, RSI extremo y cruce de VWAP.
-2. **Fase 2, analista Claude**: solo cuando la puntuación supera el umbral. Claude recibe técnicos,
-   derivados, libro, noticias y estado de la cuenta, y devuelve una decisión en JSON validada con
-   *structured outputs* + Pydantic. Cualquier respuesta inválida se convierte en `NO_TRADE`.
+1. **Sistema cuantitativo** (`quant/strategies.py`, sin coste de IA): seguimiento de tendencia
+   (rupturas de canal Donchian 20/55 y rupturas tras compresión de volatilidad, a favor de la
+   tendencia de fondo) sobre la watchlist dinámica (Top 20 por volumen + Top 5 movers).
+2. **Claude como supervisor**: revisa cada señal con noticias, funding, Open Interest y estado de la
+   cuenta, y puede **vetarla**. No inventa operaciones ni cambia el stop. Si no hay clave de Anthropic
+   el bot opera solo con el sistema cuantitativo.
+3. **Vigilante** (`execution/watchdog.py`): detecta fallos y corta fugas de dinero (ver abajo).
+4. **Panel web local** de solo lectura en http://127.0.0.1:8787.
 
 > ⚠️ **Software experimental. El trading con apalancamiento puede hacerte perder todo el capital.**
 > Empieza siempre en `TRADING_MODE=paper` y después en `USE_TESTNET=true` antes de pasar a real.
+
+## Por qué velas diarias
+
+`research/lab.py` probó 11 estrategias en 1h / 4h / 1d sobre 33 mercados con costes reales y validación
+fuera de muestra. En 15 min y 1 h **todo pierde** (los costes se comen la señal). En diario, toda la
+familia de seguimiento de tendencia es positiva dentro y fuera de muestra en 5,6 años.
+
+Prueba con 200 € (`python research/monthly.py --eur 200`), 3 posiciones máximas:
+
+| Riesgo/operación | Anual | Mes medio | Mes mediano | Peor mes | Caída máx. |
+|---|---|---|---|---|---|
+| 1 % (por defecto) | 19 % | +1,6 % | 0 % | −4,8 % | 15 % |
+| 2 % | 37 % | +3,2 % | 0 % | −9,5 % | 28 % |
+| 3 % | 53 % | +4,7 % | 0 % | −14 % | 39 % |
+
+Gana ~38 % de las operaciones; el beneficio viene de pocas tendencias largas, así que habrá muchos
+meses planos o negativos. Las cifras son de backtest (universo actual de activos, sin Claude) y el
+resultado real será previsiblemente peor.
 
 ## Estructura
 
 ```
 hyper_aegis/
-├── config/        settings.py (.env + parámetros), prompts.py (system prompt)
-├── data/          market_feed.py (REST + WebSocket L2), derivatives_data.py (OI, funding, watchlist), news_engine.py
-├── quant/         technicals.py (EMA20/50/200, RSI, ATR, VWAP), anomaly_trigger.py (Fase 1)
-├── brain/         claude_analyst.py (Fase 2), schemas.py (TradeDecision)
-├── execution/     risk_manager.py (Capital Shield), hyperliquid_trader.py (paper/live), tax_exporter.py (CSV en €)
+├── config/        settings.py (.env + parámetros), prompts.py (supervisor y diagnóstico)
+├── data/          market_feed.py, derivatives_data.py (OI, funding, watchlist), news_engine.py
+├── quant/         strategies.py (señales en vivo), technicals.py y anomaly_trigger.py (legado 15m)
+├── brain/         claude_analyst.py (veto + diagnóstico), schemas.py
+├── execution/     risk_manager.py, hyperliquid_trader.py (paper/live), watchdog.py, tax_exporter.py
+├── dashboard/     server.py + index.html (panel local)
 ├── alerts/        telegram_notifier.py
-├── tests/         tests unitarios y de ciclo de vida (pytest)
+├── research/      download.py, lab.py (laboratorio), monthly.py (retorno mensual)
+├── tests/         23 tests (pytest)
 └── run.py         orquestador asyncio
 ```
 
-## Reglas de riesgo implementadas
+## Reglas de riesgo
 
 | Regla | Implementación |
 |---|---|
-| Riesgo por operación | 1 % del capital **inicial** (400 USDC → 4 USDC), incluyendo comisiones |
-| Tamaño | `riesgo / distancia al stop`; stop de Claude si está entre 0.5 y 3 ATR, si no 1.5 ATR |
-| TP1 | R:R 1:1.5 → cierra 50 % y mueve el SL a breakeven |
-| Resto | Trailing stop a 2× ATR desde el extremo favorable (solo mejora, nunca retrocede) |
-| House Money | Al llegar a +15 % se activa y queda fijado: el riesgo abierto total nunca puede superar el colchón de ganancias (`equity − depósito`). Si el equity toca el depósito, cierra todo y se detiene (`run.py --reset-shield` para rearmar) |
-| Límites | Máximo 3 posiciones, apalancamiento máximo configurable (5x por defecto) y nocional mínimo de 10 USD |
-| Circuit breaker | Drawdown diario (UTC) > 3 % → sin nuevas entradas hasta el día siguiente (y cierre total si `FLATTEN_ON_CIRCUIT_BREAKER=true`) |
-| Protección en exchange | En LIVE, SL y TP1 son órdenes *trigger reduce-only* residentes en Hyperliquid: la posición sigue protegida aunque el Mac se apague. Al mover el stop se coloca el nuevo antes de cancelar el anterior |
+| Riesgo por operación | 1 % del **capital actual** (interés compuesto; `RISK_BASIS=initial` para fijo) |
+| Stop inicial | 2 × ATR diario, colocado como orden en el exchange |
+| Salida | Trailing stop a 3 × ATR desde el extremo favorable (`EXIT_MODE=tp_partial` recupera TP1 50 % + breakeven) |
+| Entrada tardía | No entra si el precio ya se alejó más de 1 ATR del cierre de la señal |
+| House Money | A +15 % se activa: el riesgo abierto nunca supera las ganancias acumuladas |
+| Límites | Máximo 3 posiciones, apalancamiento máximo 5x, nocional mínimo 10 USD |
+| Circuit breaker | Caída diaria > 3 % → cierra todo y no abre más hasta el día siguiente |
+
+## Vigilante: qué fallos corrige solo
+
+| Fallo detectado | Medida automática |
+|---|---|
+| Un bucle falla 3 veces seguidas | Pausa nuevas entradas hasta que se recupere |
+| Precios sin actualizar > 5 min | Pausa nuevas entradas (se reanuda solo) |
+| Posición real sin stop en el exchange | Repone el stop; si no puede, cierra la posición |
+| Posición en el exchange que el bot no gestiona | Aviso |
+| Caída brusca de capital mayor que el riesgo abierto | **Kill switch**: cierra todo y se detiene (`run.py --reset-shield`) |
+
+En cada incidente grave Claude recibe el incidente y el log y envía un diagnóstico por Telegram.
+Claude **no** modifica el código ni ejecuta órdenes por su cuenta: las medidas son siempre fijas y
+conservadoras. Con `KeepAlive` de launchd, si el proceso muere se reinicia solo y las posiciones
+siguen protegidas por el stop del exchange.
+
+## ¿Dónde está el dinero?
+
+En tu cuenta de **Hyperliquid**. El bot no custodia fondos: firma órdenes con una Agent Wallet que
+**no puede retirar**. Depositas y retiras tú desde app.hyperliquid.xyz. El panel es solo de lectura.
 
 ## Instalación en macOS
 
@@ -47,9 +89,9 @@ cd hyper_aegis
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # y rellena tus claves
-pytest                          # 18 tests
-python run.py --check           # diagnóstico: conectividad, watchlist, escaneo sin operar, tipo €
-python run.py                   # arranca (paper por defecto)
+pytest                          # 23 tests
+python run.py --check           # diagnóstico: conectividad, régimen de mercado, señales de hoy, tipo €
+python run.py                   # arranca (paper por defecto) y abre el panel en http://127.0.0.1:8787
 ```
 
 Para evitar que el Mac entre en reposo mientras corre el bot:
@@ -88,16 +130,10 @@ puede firmar órdenes: **no puede retirar fondos**. Nunca pongas la clave de tu 
 
 ## Modelo de IA
 
-Pediste `claude-3-5-sonnet`, pero Anthropic **retiró ese modelo en octubre de 2025** y la API ya no lo
-sirve. El bot usa por defecto su sucesor, `claude-sonnet-5-5` (configurable con `CLAUDE_MODEL`), con:
-
-- *structured outputs* (`output_config.format`) + re-validación Pydantic,
-- `effort` configurable (`CLAUDE_EFFORT`, `high` por defecto),
-- prompt caching del system prompt,
-- *fallback* del lado del servidor ante `stop_reason: "refusal"` (`fallbacks: "default"`, beta
-  `server-side-fallback-2026-07-01`). Se desactiva con `CLAUDE_ENABLE_FALLBACKS=false`.
-
-El coste queda acotado por `MAX_CLAUDE_CALLS_PER_HOUR` y por un cooldown de 45 min por activo.
+`claude-3-5-sonnet` está retirado; el bot usa `claude-sonnet-5-5` (configurable con `CLAUDE_MODEL`) con
+salida estructurada validada con Pydantic, prompt caching y fallback ante `refusal`. Con velas diarias
+hay pocas señales, así que el coste de Claude es de céntimos al mes. `CLAUDE_REQUIRED=true` hace que
+no se opere si Claude no responde.
 
 ## Contabilidad fiscal (España)
 
@@ -118,8 +154,8 @@ Notas importantes:
 ## Telegram
 
 Crea un bot con @BotFather, pon el token en `TELEGRAM_BOT_TOKEN` y tu chat id en `TELEGRAM_CHAT_ID`.
-Recibirás: arranque, entradas (con tesis de Claude), TP1, cierres (USDC y €), House Money, circuit
-breaker, Capital Shield y un resumen diario.
+Recibirás: arranque, entradas (con el veredicto de Claude), vetos, cierres (USDC y €), incidentes con
+diagnóstico, House Money, circuit breaker y un resumen diario.
 
 ## Estado persistente
 

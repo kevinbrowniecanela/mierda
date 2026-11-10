@@ -16,6 +16,11 @@ def settings(tmp_path):
         log_dir=tmp_path / "logs",
         tax_ledger_path=tmp_path / "tax_ledger.csv",
         initial_capital=400.0,
+        exit_mode="tp_partial",
+        trailing_atr_mult=2.0,
+        default_stop_atr_mult=1.5,
+        risk_basis="initial",
+        dashboard_enabled=False,
     )
 
 

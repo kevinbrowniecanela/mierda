@@ -363,7 +363,7 @@ class HyperliquidTrader:
                 try:
                     pos.sl_oid = await self.broker.place_trigger(plan.coin, not plan.is_long, pos.size, stop, "sl", sz_decimals)
                     tp_size = round_size(pos.size * self.s.tp1_close_fraction, sz_decimals)
-                    if tp_size > 0:
+                    if tp_size > 0 and self.s.exit_mode == "tp_partial":
                         pos.tp_oid = await self.broker.place_trigger(plan.coin, not plan.is_long, tp_size, tp1, "tp", sz_decimals)
                 except Exception as exc:  # noqa: BLE001
                     log.critical("No se pudo colocar SL/TP en %s (%s): cerrando por seguridad", plan.coin, exc)
@@ -415,9 +415,8 @@ class HyperliquidTrader:
         hit_stop = mark <= pos.stop if pos.is_long else mark >= pos.stop
         hit_tp1 = mark >= pos.tp1 if pos.is_long else mark <= pos.tp1
         if hit_stop:
-            reason = "stop_loss" if not pos.tp1_hit else ("breakeven" if pos.stop == pos.entry_px else "trailing_stop")
-            events.append(await self._close_remaining(pos, pos.stop, reason))
-        elif hit_tp1 and not pos.tp1_hit:
+            events.append(await self._close_remaining(pos, pos.stop, self._stop_reason(pos)))
+        elif hit_tp1 and not pos.tp1_hit and self.s.exit_mode == "tp_partial":
             events += await self._take_tp1(pos, pos.tp1)
         return events
 
@@ -427,6 +426,8 @@ class HyperliquidTrader:
         live_size = abs(szi or 0.0)
         if live_size == 0:
             events.append(await self._finalize_live_close(pos, "stop_exchange"))
+            return events
+        if self.s.exit_mode != "tp_partial":
             return events
         if not pos.tp1_hit and live_size < pos.size - 10 ** (-pos.sz_decimals) / 2:
             # El TP1 residente en el exchange se ha ejecutado
@@ -440,6 +441,12 @@ class HyperliquidTrader:
             if hit_tp1:
                 events += await self._take_tp1(pos, mark)
         return events
+
+    @staticmethod
+    def _stop_reason(pos: ManagedPosition) -> str:
+        if pos.stop == pos.initial_stop:
+            return "stop_loss"
+        return "breakeven" if pos.stop == pos.entry_px else "trailing_stop"
 
     async def _closing_fills(self, pos: ManagedPosition) -> list[dict]:
         fills = await self.broker.fills_since(pos.coin, pos.last_fill_check_ms)
@@ -479,7 +486,7 @@ class HyperliquidTrader:
             pos.extreme_px = max(pos.extreme_px, mark)
         else:
             pos.extreme_px = min(pos.extreme_px or mark, mark)
-        if not pos.tp1_hit or pos.atr <= 0:
+        if (self.s.exit_mode == "tp_partial" and not pos.tp1_hit) or pos.atr <= 0:
             return []
         dist = self.s.trailing_atr_mult * pos.atr
         candidate = pos.extreme_px - dist if pos.is_long else pos.extreme_px + dist
@@ -518,7 +525,7 @@ class HyperliquidTrader:
         await self.broker.cancel(pos.coin, pos.sl_oid)
         await self.broker.cancel(pos.coin, pos.tp_oid)
         if reason == "stop_exchange":
-            reason = "stop_loss" if not pos.tp1_hit else ("breakeven" if pos.stop == pos.entry_px else "trailing_stop")
+            reason = self._stop_reason(pos)
         return await self._finish(pos, pos.size, px, fee, reason)
 
     async def _finish(self, pos: ManagedPosition, size: float, px: float, exit_fee: float, reason: str) -> TradeEvent:
@@ -550,10 +557,20 @@ class HyperliquidTrader:
         self.closed_today.append(row)
         return row
 
-    async def close_all(self, marks: dict[str, float], reason: str) -> list[TradeEvent]:
+    async def repair_stop(self, pos: ManagedPosition) -> None:
+        """Repone el stop en el exchange (lo usa el vigilante)."""
+        async with self._lock:
+            pos.sl_oid = await self.broker.place_trigger(pos.coin, not pos.is_long, pos.size, pos.stop, "sl", pos.sz_decimals)
+            if pos.sl_oid is None:
+                raise RuntimeError("el exchange no devolvió oid para el stop")
+            self._save()
+
+    async def close_all(self, marks: dict[str, float], reason: str, only: str | None = None) -> list[TradeEvent]:
         events = []
         async with self._lock:
             for coin in list(self.positions):
+                if only and coin != only:
+                    continue
                 pos = self.positions[coin]
                 try:
                     events.append(await self._close_remaining(pos, marks.get(coin, pos.entry_px), reason))

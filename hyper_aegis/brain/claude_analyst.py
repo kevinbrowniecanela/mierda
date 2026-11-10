@@ -19,7 +19,7 @@ import anthropic
 from pydantic import ValidationError
 
 from brain.schemas import TRADE_DECISION_JSON_SCHEMA, Action, Setup, TradeDecision
-from config.prompts import SYSTEM_PROMPT, build_user_prompt
+from config.prompts import DIAGNOSIS_PROMPT, SYSTEM_PROMPT, build_user_prompt
 from config.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -109,3 +109,23 @@ class ClaudeAnalyst:
             meta["input_tokens"], meta["output_tokens"], meta["cache_read_tokens"],
         )
         return AnalystResult(decision, **meta)
+
+    async def diagnose(self, incident: dict, log_tail: str) -> str | None:
+        """Diagnóstico en lenguaje natural de un incidente del vigilante."""
+        try:
+            response = await self.client.messages.create(
+                model=self.s.claude_model,
+                max_tokens=4000,
+                system=DIAGNOSIS_PROMPT,
+                output_config={"effort": "low"},
+                messages=[{"role": "user", "content": (
+                    f"Incidente:\n{json.dumps(incident, ensure_ascii=False, default=str)}\n\n"
+                    f"<log>\n{log_tail[-6000:]}\n</log>"
+                )}],
+            )
+        except anthropic.APIError as exc:
+            log.warning("Diagnóstico de Claude no disponible: %s", exc)
+            return None
+        if response.stop_reason == "refusal":
+            return None
+        return "".join(b.text for b in response.content if b.type == "text").strip() or None

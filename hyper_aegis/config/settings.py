@@ -52,7 +52,10 @@ class Settings(BaseSettings):
     claude_effort: str = "high"  # low | medium | high | xhigh | max
     claude_max_tokens: int = 16000
     claude_enable_fallbacks: bool = True  # fallback server-side ante "refusal"
-    claude_min_confidence: int = 70  # confianza mínima para ejecutar
+    claude_min_confidence: int = 70  # (modo legacy) confianza mínima para ejecutar
+    # Claude como supervisor: revisa cada señal cuantitativa y puede VETARLA.
+    claude_enabled: bool = True       # se desactiva solo si no hay ANTHROPIC_API_KEY
+    claude_required: bool = False     # True: si Claude no responde, NO se opera
 
     # ------------------------------------------------------------------ #
     # Noticias
@@ -79,13 +82,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Gestión de riesgo / Capital Shield
     # ------------------------------------------------------------------ #
-    initial_capital: float = 400.0  # USDC depositados
-    risk_per_trade_pct: float = 0.01  # 1 % del capital inicial
+    initial_capital: float = 224.0  # USDC depositados (~200 EUR)
+    risk_per_trade_pct: float = 0.01  # 1 % por operación
+    risk_basis: str = "equity"  # "equity" (interés compuesto) | "initial" (fijo sobre el depósito)
+    exit_mode: str = "chandelier"  # "chandelier" (trailing ATR desde la entrada) | "tp_partial" (TP1 50 % + BE)
+    strategies: list[str] = ["donchian55_tendencia", "squeeze_breakout", "donchian20_tendencia"]
+    max_entry_drift_atr: float = 1.0  # no entrar si el precio ya se alejó >1 ATR del cierre de la señal
     house_money_trigger_pct: float = 0.15  # +15 % activa "House Money"
     tp1_rr: float = 1.5  # TP1 a R:R 1:1.5
     tp1_close_fraction: float = 0.5  # cerrar 50 % en TP1
-    trailing_atr_mult: float = 2.0  # trailing stop = 2x ATR
-    default_stop_atr_mult: float = 1.5  # SL por defecto si Claude no da uno válido
+    trailing_atr_mult: float = 3.0  # trailing stop = 3x ATR (validado en diario)
+    default_stop_atr_mult: float = 2.0  # stop inicial del sistema
     min_stop_atr_mult: float = 0.5
     max_stop_atr_mult: float = 3.0
     max_open_positions: int = 3
@@ -102,9 +109,9 @@ class Settings(BaseSettings):
     watchlist_top_movers: int = 5
     movers_min_volume_usd: float = 5_000_000
     watchlist_refresh_sec: int = 900
-    candle_interval: str = "15m"
-    candle_lookback: int = 300
-    scan_interval_sec: int = 60
+    candle_interval: str = "1d"
+    candle_lookback: int = 400
+    scan_interval_sec: int = 900
     position_check_interval_sec: int = 10
     max_concurrent_requests: int = 6
 
@@ -119,6 +126,17 @@ class Settings(BaseSettings):
     funding_extreme_hourly: float = 0.0001  # 0.01 %/h
     book_imbalance_threshold: float = 0.35
     max_claude_calls_per_hour: int = 12
+
+    # ------------------------------------------------------------------ #
+    # Vigilante (watchdog) y panel
+    # ------------------------------------------------------------------ #
+    watchdog_interval_sec: int = 60
+    watchdog_max_loop_errors: int = 3
+    watchdog_stale_data_sec: int = 300
+    watchdog_leak_pct: float = 0.05  # caída de equity entre chequeos que activa el kill switch
+    dashboard_enabled: bool = True
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8787
 
     # ------------------------------------------------------------------ #
     # Rutas

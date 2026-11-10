@@ -64,6 +64,8 @@ class ShieldState:
     day_start_equity: float = 0.0
     circuit_breaker_day: str | None = None
     shield_breached: bool = False
+    halted: bool = False          # kill switch del vigilante (rearme manual)
+    halt_reason: str = ""
     peak_equity: float = 0.0
     last_equity: float = 0.0
     history: list[dict] = field(default_factory=list)
@@ -152,8 +154,15 @@ class RiskManager:
         return self.state.circuit_breaker_day == (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
 
     def reset_shield(self) -> None:
-        """Rearme manual tras una violación del Capital Shield."""
+        """Rearme manual tras una violación del Capital Shield o un kill switch."""
         self.state.shield_breached = False
+        self.state.halted = False
+        self.state.halt_reason = ""
+        self.save()
+
+    def halt(self, reason: str) -> None:
+        self.state.halted = True
+        self.state.halt_reason = reason
         self.save()
 
     # ------------------------------------------------------------------ #
@@ -161,7 +170,10 @@ class RiskManager:
     # ------------------------------------------------------------------ #
     def risk_budget(self, equity: float, open_risk: float, open_count: int) -> float:
         """Riesgo máximo en USDC para la próxima operación."""
-        base = self.initial * self.s.risk_per_trade_pct
+        basis = equity if self.s.risk_basis == "equity" else self.initial
+        base = max(0.0, basis) * self.s.risk_per_trade_pct
+        if self.state.halted:
+            return 0.0
         if not self.state.house_money_active:
             return base
         # House Money: el riesgo se calcula sobre las ganancias. El riesgo total
@@ -175,6 +187,8 @@ class RiskManager:
 
     def can_open(self, open_count: int, equity: float, open_risk: float,
                  now: datetime | None = None) -> tuple[bool, str]:
+        if self.state.halted:
+            return False, f"Kill switch activo: {self.state.halt_reason}"
         if self.state.shield_breached:
             return False, "Capital Shield violado: trading detenido hasta rearme manual"
         if self.circuit_breaker_active(now):
