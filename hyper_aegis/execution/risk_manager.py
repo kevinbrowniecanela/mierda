@@ -148,9 +148,8 @@ class RiskManager:
         start = self.state.day_start_equity
         return 0.0 if start <= 0 else max(0.0, (start - equity) / start)
 
-    @property
-    def circuit_breaker_active(self) -> bool:
-        return self.state.circuit_breaker_day == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    def circuit_breaker_active(self, now: datetime | None = None) -> bool:
+        return self.state.circuit_breaker_day == (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
 
     def reset_shield(self) -> None:
         """Rearme manual tras una violación del Capital Shield."""
@@ -174,10 +173,11 @@ class RiskManager:
         on_profits = equity * self.s.risk_per_trade_pct
         return max(0.0, min(on_profits, cushion / slots))
 
-    def can_open(self, open_count: int, equity: float, open_risk: float) -> tuple[bool, str]:
+    def can_open(self, open_count: int, equity: float, open_risk: float,
+                 now: datetime | None = None) -> tuple[bool, str]:
         if self.state.shield_breached:
             return False, "Capital Shield violado: trading detenido hasta rearme manual"
-        if self.circuit_breaker_active:
+        if self.circuit_breaker_active(now):
             return False, "Circuit breaker diario activo"
         if open_count >= self.s.max_open_positions:
             return False, f"Máximo de {self.s.max_open_positions} posiciones alcanzado"

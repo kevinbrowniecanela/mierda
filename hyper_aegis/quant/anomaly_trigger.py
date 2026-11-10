@@ -43,6 +43,7 @@ class AnomalyTrigger:
         deriv: AssetSnapshot | None,
         oi_change_1h: float | None,
         book: L2Book | None,
+        now: float | None = None,
     ) -> AnomalyReport:
         s = self.s
         score = 0.0
@@ -117,21 +118,21 @@ class AnomalyTrigger:
             bear += 0.5
 
         bias = "long" if bull > bear + 0.5 else "short" if bear > bull + 0.5 else "neutral"
-        triggered = score >= s.anomaly_score_threshold and not self._in_cooldown(coin)
+        triggered = score >= s.anomaly_score_threshold and not self._in_cooldown(coin, now)
         return AnomalyReport(coin=coin, score=score, triggered=triggered, reasons=reasons, bias=bias)
 
     # ------------------------------------------------------------------ #
-    def _in_cooldown(self, coin: str) -> bool:
+    def _in_cooldown(self, coin: str, now: float | None = None) -> bool:
         last = self._last_trigger.get(coin, 0)
-        return time.time() - last < self.s.anomaly_cooldown_min * 60
+        return (now or time.time()) - last < self.s.anomaly_cooldown_min * 60
 
-    def claude_budget_available(self) -> bool:
-        now = time.time()
+    def claude_budget_available(self, now: float | None = None) -> bool:
+        now = now or time.time()
         while self._claude_calls and now - self._claude_calls[0] > 3600:
             self._claude_calls.popleft()
         return len(self._claude_calls) < self.s.max_claude_calls_per_hour
 
-    def mark_escalated(self, coin: str) -> None:
-        now = time.time()
+    def mark_escalated(self, coin: str, now: float | None = None) -> None:
+        now = now or time.time()
         self._last_trigger[coin] = now
         self._claude_calls.append(now)

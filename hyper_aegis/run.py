@@ -370,7 +370,7 @@ async def main() -> None:
         print("Capital Shield rearmado.")
         return
 
-    async with aiohttp.ClientSession(headers={"User-Agent": "HyperAegis/1.0"}) as session:
+    async with aiohttp.ClientSession(headers={"User-Agent": "HyperAegis/1.0"}, trust_env=True) as session:
         app = HyperAegis(settings, session)
         if args.check:
             await check(app)

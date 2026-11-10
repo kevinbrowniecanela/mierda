@@ -109,9 +109,16 @@ def snapshot(df: pd.DataFrame) -> TechSnapshot | None:
     if len(df) < 210:
         return None
     ind = add_indicators(df)
-    closed = ind.iloc[:-1]  # la última vela de Hyperliquid está abierta
-    last = closed.iloc[-1]
-    prev_atr = float(closed["atr"].iloc[-2])
+    return snapshot_at(ind, len(ind) - 2)  # la última vela de Hyperliquid está abierta
+
+
+def snapshot_at(ind: pd.DataFrame, i: int) -> TechSnapshot | None:
+    """Snapshot usando la fila `i` de un DataFrame con indicadores como última
+    vela cerrada. Solo usa datos <= i (sin look-ahead); útil para backtesting."""
+    if i < 205:
+        return None
+    last = ind.iloc[i]
+    prev_atr = float(ind["atr"].iat[i - 1])
     close = float(last["close"])
     ema20, ema50, ema200 = float(last["ema20"]), float(last["ema50"]), float(last["ema200"])
     if close > ema20 > ema50 > ema200:
@@ -123,6 +130,7 @@ def snapshot(df: pd.DataFrame) -> TechSnapshot | None:
     vol_sma = float(last["vol_sma20"]) or 1e-12
     bar_range = float(last["high"] - last["low"])
     atr = float(last["atr"])
+    closes = ind["close"]
     return TechSnapshot(
         close=close,
         ema20=ema20,
@@ -137,7 +145,7 @@ def snapshot(df: pd.DataFrame) -> TechSnapshot | None:
         vol_ratio=float(last["volume"]) / vol_sma,
         bar_range=bar_range,
         range_atr=bar_range / prev_atr if prev_atr else 0.0,
-        ret_1=float(closed["close"].iloc[-1] / closed["close"].iloc[-2] - 1),
-        ret_4=float(closed["close"].iloc[-1] / closed["close"].iloc[-5] - 1),
+        ret_1=float(closes.iat[i] / closes.iat[i - 1] - 1),
+        ret_4=float(closes.iat[i] / closes.iat[i - 4] - 1),
         trend=trend,
     )

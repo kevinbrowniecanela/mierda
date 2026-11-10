@@ -96,17 +96,20 @@ class MarketFeed:
         y reintentos exponenciales ante errores de red / rate limit."""
         info = await self.info()
         fn = getattr(info, fn_name)
-        delay = 1.0
-        for attempt in range(4):
+        attempts = 6
+        for attempt in range(attempts):
             try:
                 async with self._sem:
                     return await asyncio.to_thread(fn, *args, **kwargs)
             except Exception as exc:  # noqa: BLE001 - el SDK lanza tipos variados
-                if attempt == 3:
+                if attempt == attempts - 1:
                     raise
-                log.warning("Info.%s falló (%s); reintento en %.0fs", fn_name, exc, delay)
+                # 429 = límite de peso por minuto de Hyperliquid: espera más larga
+                rate_limited = getattr(exc, "status_code", None) == 429 or "429" in str(exc)[:8]
+                delay = (5 if rate_limited else 1) * 2**attempt
+                log.warning("Info.%s falló (%s); reintento en %ds",
+                            fn_name, "rate limit 429" if rate_limited else exc, delay)
                 await asyncio.sleep(delay)
-                delay *= 2
 
     async def meta_and_ctxs(self) -> tuple[list[dict], list[dict]]:
         meta, ctxs = await self.call("meta_and_asset_ctxs")
