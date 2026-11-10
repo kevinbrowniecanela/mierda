@@ -15,23 +15,28 @@ oro, índices y acciones). Opera en **velas diarias**:
 > ⚠️ **Software experimental. El trading con apalancamiento puede hacerte perder todo el capital.**
 > Empieza siempre en `TRADING_MODE=paper` y después en `USE_TESTNET=true` antes de pasar a real.
 
-## Por qué velas diarias
+## Estado de la validación (léelo antes de operar)
 
-`research/lab.py` probó 11 estrategias en 1h / 4h / 1d sobre 33 mercados con costes reales y validación
-fuera de muestra. En 15 min y 1 h **todo pierde** (los costes se comen la señal). En diario, toda la
-familia de seguimiento de tendencia es positiva dentro y fuera de muestra en 5,6 años.
+**El sistema diario actual NO tiene una ventaja demostrada.** El primer estudio (`research/lab.py`) daba
+~19 % anual, pero la validación dura (`research/validate.py`) lo desmonta:
 
-Prueba con 200 € (`python research/monthly.py --eur 200`), 3 posiciones máximas:
+| Prueba | Expectativa por operación | Anual (1 % riesgo) |
+|---|---|---|
+| Top 20 de hoy, 5,6 años (primer estudio, sesgado) | +0,17R | +18,8 % |
+| Top 20 de hoy, solo desde que existe Hyperliquid (may-2023) | +0,08R | +9,6 % |
+| Top 20 de cada momento, con deslistados y **funding real** | **−0,03R** | +4,1 % |
 
-| Riesgo/operación | Anual | Mes medio | Mes mediano | Peor mes | Caída máx. |
-|---|---|---|---|---|---|
-| 1 % (por defecto) | 19 % | +1,6 % | 0 % | −4,8 % | 15 % |
-| 2 % | 37 % | +3,2 % | 0 % | −9,5 % | 28 % |
-| 3 % | 53 % | +4,7 % | 0 % | −14 % | 39 % |
+- Intervalo del 95 % de la expectativa: [−0,16R, +0,11R]; 69 % de probabilidad de que sea ≤ 0.
+- Subir el riesgo no lo arregla: 5 % por operación da ~7 % anual con caída máxima del 67 %.
+- El funding real cuesta más que el supuesto fijo: 0,05R por operación (los largos pagan 0,09R).
+- En 15 min y 1 h todo pierde por costes.
+- Referencia desde mayo de 2023, comprar y mantener sin apalancamiento: BTC +34 % anual (caída 53 %),
+  oro PAXG +20 % anual (caída 30 %).
+- Única pista positiva, sin significación estadística: rotar estrategias eligiéndolas con los 12 meses
+  anteriores (+0,06R, +13 % anual, caída 5 % en 2,5 años y solo 5 ventanas).
 
-Gana ~38 % de las operaciones; el beneficio viene de pocas tendencias largas, así que habrá muchos
-meses planos o negativos. Las cifras son de backtest (universo actual de activos, sin Claude) y el
-resultado real será previsiblemente peor.
+Usa el bot en `TRADING_MODE=paper` hasta que haya un sistema que supere esta validación.
+`research/next_steps.py` reproduce el análisis de riesgo, variantes y aportaciones periódicas.
 
 ## Estructura
 
@@ -44,7 +49,7 @@ hyper_aegis/
 ├── execution/     risk_manager.py, hyperliquid_trader.py (paper/live), watchdog.py, tax_exporter.py
 ├── dashboard/     server.py + index.html (panel local)
 ├── alerts/        telegram_notifier.py
-├── research/      download.py, lab.py (laboratorio), monthly.py (retorno mensual)
+├── research/      download.py, funding.py, lab.py, monthly.py, validate.py (validación dura), next_steps.py
 ├── tests/         23 tests (pytest)
 └── run.py         orquestador asyncio
 ```
