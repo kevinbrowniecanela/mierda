@@ -38,6 +38,42 @@ SLIP_SIDE = 0.0003        # deslizamiento medio supuesto por ejecución
 FUNDING_HOURLY = 0.0000125  # 0.00125 %/h (tasa base), contado siempre en contra
 HOURS = {"1h": 1, "4h": 4, "1d": 24}
 
+# Funding real (research/funding.py): por activo, serie acumulada de la tasa
+# horaria y tramos [inicio, fin] descargados. Si una operación cae fuera de un
+# tramo descargado se usa la tasa fija FUNDING_HOURLY.
+USE_REAL_FUNDING = False
+_FUND: dict[str, tuple[pd.Series, list[tuple[pd.Timestamp, pd.Timestamp]]]] = {}
+
+
+def load_funding() -> int:
+    """Carga en memoria el funding descargado. Devuelve nº de activos con datos."""
+    _FUND.clear()
+    d = DATA / "funding"
+    if not d.exists():
+        return 0
+    for f in d.glob("*.json"):
+        blob = json.loads(f.read_text())
+        if not blob["rows"]:
+            continue
+        rows = sorted(set(map(tuple, blob["rows"])))
+        ser = pd.Series([r[1] for r in rows], index=pd.to_datetime([r[0] for r in rows], unit="ms", utc=True)).cumsum()
+        spans = [(pd.Timestamp(a, unit="ms", tz="UTC"), pd.Timestamp(b, unit="ms", tz="UTC")) for a, b in blob["spans"]]
+        _FUND[f.stem] = (ser, spans)
+    return len(_FUND)
+
+
+def real_funding(coin: str, t_in: pd.Timestamp, t_out: pd.Timestamp) -> float | None:
+    """Suma de tasas de funding entre t_in y t_out (positivo = pagan los largos)."""
+    item = _FUND.get(coin.replace(":", "_"))
+    if item is None:
+        return None
+    ser, spans = item
+    if not any(a <= t_in and t_out <= b for a, b in spans):
+        return None
+    lo = ser.asof(t_in)
+    hi = ser.asof(t_out)
+    return float((0.0 if pd.isna(hi) else hi) - (0.0 if pd.isna(lo) else lo))
+
 
 # ---------------------------------------------------------------------- #
 # Datos e indicadores
@@ -72,9 +108,11 @@ class Trade:
     r: float          # resultado neto en R
     stop_pct: float   # distancia del stop inicial / precio (para apalancamiento)
     bars: int
+    fund_r: float = 0.0  # coste de funding en R (negativo = cobrado)
 
 
-def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str) -> list[Trade]:
+def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray | None = None) -> list[Trade]:
+    """`elig[i]` (opcional): solo se aceptan señales en velas donde el activo es elegible."""
     o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
     a = atr(df).to_numpy()
     sig = np.asarray(spec["sig"])
@@ -89,6 +127,8 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str) -> list[Trade]:
     i = 210
     while i < n - 1:
         s = int(sig[i])
+        if elig is not None and not elig[i]:
+            s = 0
         if s == 0 or not np.isfinite(a[i]) or a[i] <= 0:
             i += 1
             continue
@@ -126,8 +166,13 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str) -> list[Trade]:
                 break
             j += 1
         bars = j - e_i + 1
-        cost = entry * (2 * (FEE_SIDE + SLIP_SIDE) + fund_bar * bars)
-        trades.append(Trade(coin, times[e_i], times[j], s, (realized - cost) / r, r / entry, bars))
+        fund = fund_bar * bars  # supuesto fijo, siempre en contra
+        if USE_REAL_FUNDING:
+            rf = real_funding(coin, times[e_i], times[j])
+            if rf is not None:
+                fund = s * rf  # el largo paga si la tasa es positiva; el corto la cobra
+        cost = entry * (2 * (FEE_SIDE + SLIP_SIDE) + fund)
+        trades.append(Trade(coin, times[e_i], times[j], s, (realized - cost) / r, r / entry, bars, entry * fund / r))
         i = j + 1
     return trades
 

@@ -43,7 +43,27 @@ def universe(n_crypto: int = 20, n_trad: int = 10) -> list[str]:
     return crypto + trad
 
 
+def all_daily() -> None:
+    """Histórico diario de TODOS los perps del dex principal, incluidos los deslistados."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    meta = post({"type": "meta"})
+    info = {a["name"]: bool(a.get("isDelisted")) for a in meta["universe"]}
+    (OUT / "universe_all.json").write_text(json.dumps(info))
+    now = int(time.time() * 1000)
+    for coin in info:
+        f = OUT / f"{coin}_1d.json"
+        if f.exists() and time.time() - f.stat().st_mtime < 24 * 3600:
+            continue
+        rows = post({"type": "candleSnapshot", "req": {"coin": coin, "interval": "1d", "startTime": now - MS["1d"] * 5000, "endTime": now}})
+        f.write_text(json.dumps(rows))
+        print(f"{coin:12s} {'DESLISTADO' if info[coin] else '':10s} {len(rows):5d}", flush=True)
+        time.sleep(2.5)
+    print("DESCARGA_OK", flush=True)
+
+
 def main() -> None:
+    if sys.argv[1:] == ["--all-daily"]:
+        return all_daily()
     OUT.mkdir(parents=True, exist_ok=True)
     coins = sys.argv[1:] or universe()
     (OUT / "universe.json").write_text(json.dumps(coins))
