@@ -42,6 +42,7 @@ HOURS = {"1h": 1, "4h": 4, "1d": 24}
 # horaria y tramos [inicio, fin] descargados. Si una operación cae fuera de un
 # tramo descargado se usa la tasa fija FUNDING_HOURLY.
 USE_REAL_FUNDING = False
+RECORD_PATHS = False  # guarda el recorrido del stop de cada operación (para las repeticiones visuales)
 _FUND: dict[str, tuple[pd.Series, list[tuple[pd.Timestamp, pd.Timestamp]]]] = {}
 
 
@@ -109,6 +110,9 @@ class Trade:
     stop_pct: float   # distancia del stop inicial / precio (para apalancamiento)
     bars: int
     fund_r: float = 0.0  # coste de funding en R (negativo = cobrado)
+    entry_px: float = 0.0
+    exit_px: float = 0.0  # precio de la última pata de salida
+    stops: list | None = None  # (fecha, stop) por vela; solo si lab.RECORD_PATHS
 
 
 def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray | None = None) -> list[Trade]:
@@ -138,6 +142,8 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray 
         stop = entry - s * r
         ext = entry
         size, realized, tp_done = 1.0, 0.0, False
+        exit_px = entry
+        path: list | None = [] if RECORD_PATHS else None
         tp = entry + s * 1.5 * r
         j = e_i
         while True:
@@ -146,6 +152,9 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray 
             if (adverse - stop) * s <= 0:
                 px = o[j] if (o[j] - stop) * s < 0 else stop
                 realized += size * (px - entry) * s
+                exit_px = px
+                if path is not None:
+                    path.append((times[j], float(stop)))
                 break
             if mode == "tp_partial" and not tp_done and (fav - tp) * s >= 0:
                 realized += 0.5 * (tp - entry) * s
@@ -162,8 +171,11 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray 
             if (flag is not None and flag[j]) or timed_out or j >= n - 1:
                 px = o[j + 1] if j + 1 < n else c[j]
                 realized += size * (px - entry) * s
+                exit_px = px
                 j = min(j + 1, n - 1)
                 break
+            if path is not None:
+                path.append((times[j], float(stop)))
             j += 1
         bars = j - e_i + 1
         fund = fund_bar * bars  # supuesto fijo, siempre en contra
@@ -172,7 +184,7 @@ def simulate(coin: str, df: pd.DataFrame, spec: dict, iv: str, elig: np.ndarray 
             if rf is not None:
                 fund = s * rf  # el largo paga si la tasa es positiva; el corto la cobra
         cost = entry * (2 * (FEE_SIDE + SLIP_SIDE) + fund)
-        trades.append(Trade(coin, times[e_i], times[j], s, (realized - cost) / r, r / entry, bars, entry * fund / r))
+        trades.append(Trade(coin, times[e_i], times[j], s, (realized - cost) / r, r / entry, bars, entry * fund / r, float(entry), float(exit_px), path))
         i = j + 1
     return trades
 

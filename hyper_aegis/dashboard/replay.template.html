@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Repetición del bot</title>
+<style>
+  :root { --bg:#f4f5f8; --card:#fff; --ink:#141922; --mute:#667085; --line:#e5e8ee; --up:#0e9f6e; --down:#d92d20; --accent:#3b5bdb; --warn:#b26a00; --chip:#eef1f6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --card:#151b23; --ink:#e7eaf0; --mute:#8a96a6; --line:#252d38; --up:#3ecf8e; --down:#ff6b6b; --accent:#8aa4ff; --warn:#f0b429; --chip:#1d2530; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:16px 16px 48px; }
+  h1 { font-size:19px; margin:0; letter-spacing:-.01em; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mute); margin:0 0 10px; font-weight:600; }
+  .top { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin-bottom:6px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--card); }
+  .seg button { border:0; background:transparent; color:var(--mute); padding:6px 12px; font:inherit; cursor:pointer; }
+  .seg button[aria-pressed="true"] { background:var(--accent); color:#fff; }
+  .note { color:var(--mute); font-size:12px; margin:2px 0 12px; }
+  .ctl { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px 14px; margin-bottom:12px; }
+  .ctl .play { border:0; border-radius:9px; background:var(--accent); color:#fff; padding:7px 16px; font:inherit; font-weight:600; cursor:pointer; min-width:92px; }
+  .ctl input[type=range] { flex:1; min-width:160px; accent-color:var(--accent); }
+  .date { font-variant-numeric:tabular-nums; font-weight:600; min-width:92px; text-align:right; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .kpis { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); margin-bottom:12px; }
+  .k { color:var(--mute); font-size:12px; } .v { font-size:24px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .sub { color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .row { display:grid; gap:12px; grid-template-columns:1fr; margin-bottom:12px; }
+  @media (min-width: 900px) { .row { grid-template-columns:3fr 2fr; } }
+  svg { width:100%; display:block; }
+  .poscards { display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); }
+  .pos { border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .pos .hd { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 8px; margin-bottom:4px; }
+  .nm { font-weight:650; font-size:16px; white-space:nowrap; } .tag { font-size:11px; padding:1px 7px; border-radius:99px; background:var(--chip); }
+  .pl { margin-left:auto; font-weight:650; font-variant-numeric:tabular-nums; }
+  .feed { display:flex; flex-direction:column; gap:8px; max-height:380px; overflow:auto; }
+  .item { border-left:3px solid var(--line); padding-left:10px; font-size:13px; }
+  .item.in { border-color:var(--accent); } .item.out.win { border-color:var(--up); } .item.out.loss { border-color:var(--down); } .item.stop { border-color:var(--warn); }
+  .item .d { color:var(--mute); font-size:12px; margin-right:6px; font-variant-numeric:tabular-nums; }
+  .empty { color:var(--mute); padding:6px 0; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:6px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1>Así opera el bot, día a día</h1>
+    <div class="seg" role="group" aria-label="Mercado" id="seg"></div>
+  </div>
+  <p class="note" id="note"></p>
+
+  <div class="ctl">
+    <button class="play" id="play">⏸ Pausa</button>
+    <button class="play" id="restart" style="background:var(--chip);color:var(--ink);min-width:0">↺</button>
+    <div class="seg" role="group" aria-label="Velocidad" id="speed">
+      <button data-s="1" aria-pressed="false">1×</button><button data-s="3" aria-pressed="true">3×</button><button data-s="10" aria-pressed="false">10×</button>
+    </div>
+    <input type="range" id="slider" min="0" value="0" aria-label="Día de la repetición">
+    <span class="date" id="date"></span>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="row">
+    <section class="card"><h2>Capital del bot</h2><svg id="eq" role="img" aria-label="Evolución del capital"></svg>
+      <div class="legend"><span>Línea discontinua = capital inicial</span></div></section>
+    <section class="card"><h2>Lo que hace el bot</h2><div class="feed" id="feed"></div></section>
+  </div>
+
+  <section class="card"><h2>Posiciones abiertas hoy</h2><div class="poscards" id="pos"></div></section>
+</main>
+
+<script>/*__CHARTS__*/</script>
+<script>
+const DATA = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) k === "class" ? e.className = v : e.setAttribute(k, v); for (const kid of kids) e.append(kid instanceof Node ? kid : document.createTextNode(kid ?? "")); return e; };
+const fmt = (n, d = 2) => Number(n).toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
+const sign = n => (n > 0 ? "+" : "") + fmt(n);
+const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
+const px = n => HA.fmtPx(Number(n));
+const dstr = t => new Date(t * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+let ds, day = 0, timer = null, playing = true, speed = 3;
+const MS = { 1: 650, 3: 240, 10: 70 };
+
+function setDataset(i) {
+  ds = DATA[i]; day = 0;
+  [...$("seg").children].forEach((b, k) => b.setAttribute("aria-pressed", k === i ? "true" : "false"));
+  $("note").textContent = `${ds.label}. Repetición de un backtest con datos reales de los últimos ${ds.days.length} días (riesgo ${(ds.risk * 100).toFixed(0)} % por operación, máx. ${ds.max_pos} posiciones, capital inicial ${ds.start} ${ds.currency}). No son operaciones reales.`;
+  $("slider").max = ds.days.length - 1; $("slider").value = 0;
+  render(); play(true);
+}
+
+function isOpen(t) { return t.di <= day && day < t.xi; }
+
+function render() {
+  const t = ds.days[day], CUR = ds.currency;
+  $("date").textContent = dstr(t); $("slider").value = day;
+  const eq = ds.equity[day], ret = (eq / ds.start - 1) * 100;
+  const closed = ds.trades.filter(x => x.xi <= day && x.xi < ds.days.length), open = ds.trades.filter(isOpen);
+  const wins = closed.filter(x => x.pnl > 0).length;
+  const card = (k, v, s, c = "") => el("div", { class: "card" }, el("div", { class: "k" }, k), el("div", { class: "v " + c }, v), el("div", { class: "sub" }, s || ""));
+  $("kpis").replaceChildren(
+    card("Capital", fmt(eq) + " " + CUR, `inicio ${fmt(ds.start, 0)} ${CUR}`),
+    card("Resultado", sign(eq - ds.start) + " " + CUR, `${sign(ret)} %`, cls(eq - ds.start)),
+    card("Posiciones abiertas", `${open.length} de ${ds.max_pos}`, open.length ? open.map(x => x.coin).join(", ") : "en efectivo"),
+    card("Operaciones cerradas", String(closed.length), closed.length ? `${fmt(wins / closed.length * 100, 0)} % ganadoras` : "todavía ninguna"));
+
+  HA.line($("eq"), ds.days.slice(0, day + 1).map((d, i) => [d, ds.equity[i]]), { base: ds.start, H: 330 });
+
+  // posiciones abiertas con su gráfico de velas hasta hoy
+  const pos = $("pos");
+  if (!open.length) pos.replaceChildren(el("div", { class: "empty" }, "Ninguna posición abierta: el bot espera una señal."));
+  else pos.replaceChildren(...open.map(x => {
+    const sv = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const cs = ds.candles[x.coin].filter(c => c[0] <= t).slice(-70).map(c => ({ t: c[0], o: c[1], h: c[2], l: c[3], c: c[4] }));
+    const last = cs[cs.length - 1].c, stop = x.stops[Math.min(day - x.di, x.stops.length - 1)];
+    const sgn = x.side === "LONG" ? 1 : -1, upl = x.notional * (last / x.entry - 1) * sgn;
+    const r = (last - x.entry) * sgn / Math.abs(x.entry - x.stops[0]);
+    HA.candles(sv, cs, { W: 460, H: 210, lines: [{ y: x.entry, label: "entrada " + px(x.entry), color: "var(--accent)" }, { y: stop, label: "stop " + px(stop), color: "var(--down)" }],
+      markers: [{ t: ds.days[x.di], y: x.entry, type: sgn > 0 ? "buy" : "sell", label: "entrada" }] });
+    return el("div", { class: "pos" }, el("div", { class: "hd" }, el("span", { class: "nm" }, x.coin), el("span", { class: "tag " + (sgn > 0 ? "up" : "down") }, x.side),
+      el("span", { class: "sub" }, `${day - x.di} días abierta`), el("span", { class: "pl " + cls(upl) }, `${sign(upl)} ${CUR} · ${sign(r)}R`)), sv);
+  }));
+
+  // registro de acciones hasta hoy
+  const ev = [];
+  for (const x of ds.trades) {
+    if (x.di <= day) ev.push({ d: x.di, p: 1, k: "in", h: `${x.side === "LONG" ? "Compra" : "Venta en corto"} de ${x.coin} a ${px(x.entry)}`, s: `stop inicial ${px(x.stops[0])} · tamaño ${fmt(x.notional, 0)} ${CUR}` });
+    for (let k = 1; k < x.stops.length; k++) if (x.di + k <= day && Math.abs(x.stops[k] / x.stops[k - 1] - 1) > 1e-4 && ((x.stops[k] - x.stops[k - 1]) * (x.side === "LONG" ? 1 : -1) > 0))
+      ev.push({ d: x.di + k, p: 2, k: "stop", h: `${x.coin}: el stop ${x.side === "LONG" ? "sube" : "baja"} a ${px(x.stops[k])}`, s: "protege las ganancias (trailing)" });
+    if (x.xi <= day && x.xi < ds.days.length) ev.push({ d: x.xi, p: 3, k: "out " + (x.pnl > 0 ? "win" : "loss"), h: `Cierra ${x.coin} a ${px(x.exit)}: ${sign(x.pnl)} ${CUR}`, s: `${sign(x.r)}R · ${x.reason.replace("_", " ")}` });
+  }
+  ev.sort((a, b) => b.d - a.d || b.p - a.p);
+  const feed = $("feed"); feed.replaceChildren();
+  if (!ev.length) feed.append(el("div", { class: "empty" }, "Nada todavía: el bot espera la primera señal."));
+  for (const e of ev.slice(0, 40)) feed.append(el("div", { class: "item " + e.k }, el("span", { class: "d" }, dstr(ds.days[e.d]).replace(/ \d{4}$/, "")), el("strong", {}, e.h), el("div", { class: "sub" }, e.s)));
+}
+
+function step() { if (day < ds.days.length - 1) { day++; render(); } else play(false); }
+function play(on) {
+  playing = on; clearInterval(timer);
+  if (on) { if (day >= ds.days.length - 1) day = 0; timer = setInterval(step, MS[speed]); }
+  $("play").textContent = on ? "⏸ Pausa" : "▶ Reproducir";
+}
+$("play").onclick = () => play(!playing);
+$("restart").onclick = () => { day = 0; render(); play(true); };
+$("slider").oninput = e => { day = +e.target.value; render(); };
+$("speed").onclick = e => { const b = e.target.closest("button"); if (!b) return; speed = +b.dataset.s; [...$("speed").children].forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); if (playing) play(true); };
+DATA.forEach((d, i) => { const b = el("button", { "aria-pressed": "false" }, d.key === "stocks" ? "Acciones EE. UU." : "Cripto"); b.onclick = () => setDataset(i); $("seg").append(b); });
+setDataset(0);
+</script>
+</body>
+</html>

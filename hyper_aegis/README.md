@@ -78,6 +78,37 @@ vigilante y supervisor Claude. Estado, ledger y panel están separados del bot d
 no está soportado: no hay broker de acciones integrado. Datos de Yahoo Finance con retardo de ~15 min.
 
 
+### Modo cartera (acciones, simulación)
+
+Núcleo indexado (SPY) + satélite del bot + caja de ganancias. Se activa con `PORTFOLIO_MODE=true`:
+
+```bash
+ENV_FILE=.env.stocks python run.py --deposit 100          # aportación en EUR (--currency usd para dólares); parar el bot antes
+```
+
+Cada aportación se reparte `PORTFOLIO_CORE_PCT` (70 %) al núcleo y el resto al satélite. Cada trimestre se asegura
+`PORTFOLIO_LOCK_FRAC` (50 %) de la ganancia del satélite, en efectivo (`PORTFOLIO_LOCK_TO=cash`) o en el núcleo
+(`core`), y el Capital Shield se rebasa. Estudio (`research/portfolio_formula.py`, aportación mensual, 2010-2026):
+
+| Fórmula | TIR anual | Caída máx. |
+|---|---|---|
+| Solo SPY | 13,5 % | 34 % |
+| Solo QQQ | 17,6 % | 35 % |
+| 70 % SPY + 30 % bot | 13,4 % | 26 % |
+| 70/30 + 50 % de ganancias a caja | 12,7 % | 26 % |
+| SPY solo sobre su media de 200 días | 10,4 % | 20 % |
+
+Ninguna fórmula domina: asegurar ganancias cuesta ~0,7 puntos de rentabilidad y apenas cambia la caída del
+conjunto (si se pasan a SPY, ni eso). Lo que más pesa es el núcleo elegido. El satélite se aproxima con ganancias
+realizadas y con universo con sesgo de supervivencia.
+
+### Panel visual y repetición
+
+- `python run.py` abre el panel en http://127.0.0.1:8787 (8788 en acciones): velas de cada posición con entrada, stop
+  y precio actual, mapa del mercado con señales, actividad, reparto de la cartera y gráfico al pulsar cualquier fila.
+- `python research/make_replay.py` genera `dashboard/replay.html`, una repetición animada autocontenida del bot día
+  a día sobre datos reales (acciones y cripto). Se abre con doble clic.
+
 ## Estructura
 
 ```
@@ -90,7 +121,7 @@ hyper_aegis/
 ├── dashboard/     server.py + index.html (panel local)
 ├── alerts/        telegram_notifier.py
 ├── research/      download.py, funding.py, lab.py, monthly.py, validate.py (validación dura), next_steps.py
-├── tests/         28 tests (pytest)
+├── tests/         33 tests (pytest)
 └── run.py         orquestador asyncio
 ```
 
@@ -134,7 +165,7 @@ cd hyper_aegis
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # y rellena tus claves
-pytest                          # 28 tests
+pytest                          # 33 tests
 python run.py --check           # diagnóstico: conectividad, régimen de mercado, señales de hoy, tipo €
 python run.py                   # arranca (paper por defecto) y abre el panel en http://127.0.0.1:8787
 ```
