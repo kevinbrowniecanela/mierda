@@ -57,22 +57,40 @@ Usa el bot en `TRADING_MODE=paper` hasta que haya un sistema que supere esta val
   acciones, solo largos y con 1 % de riesgo, dio 12,5 % con caída 22 %: parecido en rentabilidad, menos
   caída, pero con sesgo de supervivencia (Yahoo solo ofrece empresas que hoy cotizan).
 - Control sin ese sesgo, con 5 ETF: 2,3 % anual con la señal frente a 0,5 % al azar. Pocas operaciones.
-- Los picos de volumen con gran rango (huecos tras resultados) dieron +0,2R a +0,3R con solo ~190
-  operaciones; hace falta más muestra antes de fiarse.
+- Los picos de volumen con gran rango parecían dar +0,2R a +0,3R con ~190 operaciones, pero con 524 acciones y
+  569 operaciones (`research/volspike_study.py`) queda en +0,13R frente a +0,09R de entrar al azar (ventaja
+  de +0,04R), y solo 16 de 34 combinaciones de parámetros superan al azar. Como cartera sin apalancamiento
+  rinde ~2 % anual y, sumado a la tendencia, la empeora (7,6 % frente a 10,0 %). Descartado.
+- Sin apalancamiento (cuenta al contado, 5 posiciones) el conjunto de tendencia largo da 10,0 % anual con
+  caída del 19 % (1 % de riesgo) y 11,9 % con caída del 22 % (2 %), frente a 13,5 % y caída del 34 % de SPY.
+
+## Modo acciones de EE. UU. (solo simulación)
+
+```bash
+cp .env.stocks.example .env.stocks        # y edítalo
+ENV_FILE=.env.stocks python run.py --check
+ENV_FILE=.env.stocks python run.py        # panel en http://127.0.0.1:8788
+```
+
+Opera en simulación las 40 acciones más líquidas de `config/stock_universe.txt`: solo largos, velas diarias
+completas, sin apalancamiento, entradas solo con el mercado abierto (9:30-16:00 ET con cotizaciones frescas),
+vigilante y supervisor Claude. Estado, ledger y panel están separados del bot de cripto. `TRADING_MODE=live`
+no está soportado: no hay broker de acciones integrado. Datos de Yahoo Finance con retardo de ~15 min.
+
 
 ## Estructura
 
 ```
 hyper_aegis/
 ├── config/        settings.py (.env + parámetros), prompts.py (supervisor y diagnóstico)
-├── data/          market_feed.py, derivatives_data.py (OI, funding, watchlist), news_engine.py
+├── data/          market_feed.py, derivatives_data.py (OI, funding, watchlist), news_engine.py, stock_feed.py (acciones)
 ├── quant/         strategies.py (señales en vivo), technicals.py y anomaly_trigger.py (legado 15m)
 ├── brain/         claude_analyst.py (veto + diagnóstico), schemas.py
 ├── execution/     risk_manager.py, hyperliquid_trader.py (paper/live), watchdog.py, tax_exporter.py
 ├── dashboard/     server.py + index.html (panel local)
 ├── alerts/        telegram_notifier.py
 ├── research/      download.py, funding.py, lab.py, monthly.py, validate.py (validación dura), next_steps.py
-├── tests/         23 tests (pytest)
+├── tests/         28 tests (pytest)
 └── run.py         orquestador asyncio
 ```
 
@@ -116,7 +134,7 @@ cd hyper_aegis
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # y rellena tus claves
-pytest                          # 23 tests
+pytest                          # 28 tests
 python run.py --check           # diagnóstico: conectividad, régimen de mercado, señales de hoy, tipo €
 python run.py                   # arranca (paper por defecto) y abre el panel en http://127.0.0.1:8787
 ```
