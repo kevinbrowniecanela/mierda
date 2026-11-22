@@ -32,9 +32,8 @@ def build(key, label, currency, frames, trades, anchor, risk, max_pos, lev_cap, 
     days = [d for d in frames[anchor].index if d >= end - pd.Timedelta(days=WINDOW_DAYS)]
     d0 = days[0]
     idx = {d: i for i, d in enumerate(days)}
-    pos = lambda t: idx.get(t, None)
     win = sorted([t for t in trades if t.t_in >= d0 and t.t_in in idx], key=lambda t: t.t_in)
-    eq, open_, taken, closed_events = start, [], [], []
+    eq, open_, taken = start, [], []
     for t in win:
         for o in [o for o in open_ if o["t"].t_out <= t.t_in]:
             eq += o["pnl"]; open_.remove(o)
@@ -48,7 +47,7 @@ def build(key, label, currency, frames, trades, anchor, risk, max_pos, lev_cap, 
         open_.append({"t": t, "pnl": pnl, "notional": notional})
         taken.append({"t": t, "pnl": pnl, "notional": notional})
     # curva diaria con valoración a mercado
-    realized, equity = start, []
+    equity = []
     for d in days:
         r = start + sum(x["pnl"] for x in taken if x["t"].t_out <= d)
         u = 0.0

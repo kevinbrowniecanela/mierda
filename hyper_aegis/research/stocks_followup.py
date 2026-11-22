@@ -12,12 +12,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lab  # noqa: E402
 import stocks_study as ss  # noqa: E402
-import validate as v  # noqa: E402
 from quant.strategies import STRATEGIES  # noqa: E402
 
 

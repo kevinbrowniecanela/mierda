@@ -107,7 +107,7 @@ class StockFeed:
     # --- datos ------------------------------------------------------------- #
     async def _get_json(self, url: str, params: dict) -> dict | None:
         delay = 1.0
-        for attempt in range(4):
+        for _ in range(4):
             try:
                 async with self._sem, self.http.get(url, params=params, headers=UA, timeout=aiohttp.ClientTimeout(total=25)) as r:
                     if r.status == 200:

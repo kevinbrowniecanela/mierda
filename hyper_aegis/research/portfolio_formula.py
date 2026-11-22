@@ -50,7 +50,7 @@ def irr_monthly(flows: list[float]) -> float:
 def simulate(dates, r_core, flag_core, r_sleeve, core_w: float, lock: float, name: str, to_cash: bool = False):
     core = sleeve = vault = 0.0
     basis = 0.0
-    v_prev, vals, twr, flows_m, last_month, last_q = 0.0, [], [], [], None, None
+    vals, twr, flows_m, last_month, last_q = [], [], [], None, None
     for t in dates:
         flow = 0.0
         q = (t.year, (t.month - 1) // 3)

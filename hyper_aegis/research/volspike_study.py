@@ -132,7 +132,6 @@ def main() -> None:
         for risk, mp in ((0.01, 5), (0.02, 5), (0.02, 10)):
             p = lab.portfolio(tr, risk=risk, max_pos=mp, lev_cap=1.0, start=224)
             print(f"   {label:32s} riesgo {risk:.0%}, {mp:>2} pos: {p['cagr']:+5.1f} % anual, caída {p['maxdd']:4.1f} %, {p['taken']} de {len(tr)} operaciones")
-    ens_names = ["donchian55_tendencia", "squeeze_breakout", "donchian20_tendencia"]
     from quant.strategies import STRATEGIES
     el40 = {c: (liq.rank(axis=1, ascending=False) <= 40)[c] for c in liq.columns}
     sig_sum = lambda d: (lambda sp: (sp.update(sig=np.clip(sp["sig"], 0, None)), sp)[1])(STRATEGIES["ensemble_diario"](d))
