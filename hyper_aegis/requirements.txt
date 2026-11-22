@@ -1,4 +1,4 @@
-# HyperAegis — Python 3.11+ (probado con 3.12/3.13 en macOS)
+# HyperAegis — Python 3.10+ (probado con 3.13 en Linux; en macOS usa 3.11 o 3.12)
 hyperliquid-python-sdk>=0.24.0
 eth-account>=0.10.0,<0.14.0
 anthropic>=2.5.0
@@ -10,9 +10,10 @@ websockets>=12.0
 feedparser>=6.0
 pandas>=2.2
 numpy>=1.26
-# Indicadores técnicos. Si no se instala en tu versión de Python, el bot usa
-# implementaciones equivalentes en pandas puro (quant/technicals.py).
-pandas-ta>=0.3.14b0 ; python_version < "3.13"
+# Indicadores técnicos (strategy/indicators.py). Si pandas-ta no está disponible o falla, se usa un cálculo
+# equivalente en pandas puro (diferencia máxima < 2e-5, comprobada en los tests).
+pandas-ta>=0.4.71b0 ; python_version >= "3.12"
+pandas-ta>=0.3.14b0 ; python_version < "3.12"
 
 # Tests
 pytest>=8.0

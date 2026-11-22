@@ -109,19 +109,43 @@ realizadas y con universo con sesgo de supervivencia.
 - `python research/make_replay.py` genera `dashboard/replay.html`, una repetición animada autocontenida del bot día
   a día sobre datos reales (acciones y cripto). Se abre con doble clic.
 
+## Escáner multi-timeframe (`strategy/`, solo lectura)
+
+Tres módulos desacoplados más un escáner que los une. No firma ni envía órdenes.
+
+```bash
+python -m strategy.scanner --testnet --top-volume 15       # lectura contra TESTNET_API_URL
+python -m strategy.scanner --mainnet --top-volume 20 --top-movers 5 -v
+python -m strategy.scanner --coins BTC ETH SOL --account-value 224 --json
+RUN_LIVE_TESTS=1 pytest tests/test_strategy_live.py -v     # prueba de lectura real (LIVE_NETWORK=mainnet para mainnet)
+```
+
+| Módulo | Qué hace |
+|---|---|
+| `market_data.py` | Velas 4h/1h/15m con columna `closed` (reloj del servidor sincronizado con el L2), contexto de perpetuos (funding actual y predicho, OI con histórico en memoria), spread y profundidad del L2, watchlist dinámica; API síncrona y asíncrona con reintentos |
+| `filters_and_candles.py` | Embudo (datos → ATR/precio → volumen relativo > 1,5x → régimen ADX/EMA 50-200 en 4h y 1h → derivados) y 4 patrones sobre velas cerradas: barrida de liquidez, ruptura tras compresión, envolvente con tendencia, pin bar en zona clave |
+| `confluence_and_risk.py` | Puntuación 0-10 (MTF 2,5 + patrón 3 + volumen 2 + funding/OI 1,5 + ADX 1), aprobación con >= 6,5, stop tras la mecha o a 1,5 ATR (máx. 3 ATR), R:R 1:2 (1:2,5 con puntuación >= 8,5) y tamaño `capital x 1 % / |entrada - stop|` redondeado hacia abajo a `szDecimals` |
+
+Notas de diseño: el funding de Hyperliquid es **horario** (0,0003 = 0,03 %/h, ya extremo; lo habitual es 0,00125 %/h),
+por eso hay un umbral de penalización a 0,01 %/h y uno de bloqueo a 0,03 %/h. El OI necesita dos lecturas: el escáner
+guarda `state/oi_history.json` y lo reutiliza en la siguiente ejecución. Los indicadores usan `pandas-ta` y, si falla o
+hay pocas velas, un cálculo nativo equivalente (diferencia < 2e-5). **Esta capa no está validada con un backtest**: las
+pruebas de `research/` mostraron que las estrategias de 15 min y 1 h pierden por costes.
+
 ## Estructura
 
 ```
 hyper_aegis/
 ├── config/        settings.py (.env + parámetros), prompts.py (supervisor y diagnóstico)
 ├── data/          market_feed.py, derivatives_data.py (OI, funding, watchlist), news_engine.py, stock_feed.py (acciones)
+├── strategy/      market_data.py, filters_and_candles.py, confluence_and_risk.py, scanner.py (escáner de solo lectura)
 ├── quant/         strategies.py (señales en vivo), technicals.py y anomaly_trigger.py (legado 15m)
 ├── brain/         claude_analyst.py (veto + diagnóstico), schemas.py
 ├── execution/     risk_manager.py, hyperliquid_trader.py (paper/live), watchdog.py, tax_exporter.py
 ├── dashboard/     server.py + index.html (panel local)
 ├── alerts/        telegram_notifier.py
 ├── research/      download.py, funding.py, lab.py, monthly.py, validate.py (validación dura), next_steps.py
-├── tests/         33 tests (pytest)
+├── tests/         93 tests (pytest)
 └── run.py         orquestador asyncio
 ```
 
@@ -165,7 +189,7 @@ cd hyper_aegis
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # y rellena tus claves
-pytest                          # 33 tests
+pytest                          # 93 tests
 python run.py --check           # diagnóstico: conectividad, régimen de mercado, señales de hoy, tipo €
 python run.py                   # arranca (paper por defecto) y abre el panel en http://127.0.0.1:8787
 ```
