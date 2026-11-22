@@ -90,7 +90,7 @@ class StockFeed:
 
     # --- compatibilidad con MarketFeed ----------------------------------- #
     def set_ws_coins(self, coins: list[str]) -> None:
-        self.coins = set(coins)
+        self.coins = set(coins) | {self.s.portfolio_core_symbol}  # el núcleo siempre cotiza
 
     def start_ws(self) -> asyncio.Task:
         async def idle() -> None:

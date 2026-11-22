@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     allow_short: bool = True  # False: descarta señales cortas (recomendado en acciones)
     min_order_usd: float = 10.0  # nocional mínimo de una orden (10 en Hyperliquid)
     stock_watchlist_size: int = 40
+    # Modo cartera (solo acciones, simulación): núcleo indexado + satélite del bot + caja
+    portfolio_mode: bool = False
+    portfolio_core_symbol: str = "SPY"
+    portfolio_core_pct: float = 0.7        # parte de cada aportación que va al núcleo
+    portfolio_lock_frac: float = 0.5       # parte de la ganancia trimestral del satélite que se asegura
+    portfolio_lock_to: str = "cash"        # "cash" (efectivo) | "core" (se invierte en el núcleo)
     stock_universe_file: Path = PROJECT_ROOT / "config" / "stock_universe.txt"
     use_testnet: bool = False
 

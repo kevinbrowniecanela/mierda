@@ -103,6 +103,9 @@ class Broker(ABC):
     @abstractmethod
     async def market(self, coin: str, is_buy: bool, size: float, reduce_only: bool, ref_px: float) -> Fill | None: ...
 
+    def add_cash(self, amount: float) -> None:
+        raise NotImplementedError("las aportaciones solo existen en simulación")
+
     async def place_trigger(self, coin: str, close_is_buy: bool, size: float, trigger_px: float, kind: str, sz_dec: int) -> int | None:
         return None
 
@@ -147,6 +150,10 @@ class PaperBroker(Broker):
         self.cash -= fee
         self._save()
         return Fill(avg_px=px, size=size, fee=fee)
+
+    def add_cash(self, amount: float) -> None:
+        self.cash += amount
+        self._save()
 
     def book_pnl(self, pnl: float) -> None:
         self.cash += pnl

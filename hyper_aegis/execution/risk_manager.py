@@ -160,6 +160,26 @@ class RiskManager:
         self.state.halt_reason = ""
         self.save()
 
+    def add_capital(self, amount: float) -> None:
+        """Aportación al satélite: sube la base del Capital Shield sin contarla como beneficio."""
+        st = self.state
+        st.initial_capital += amount
+        st.day_start_equity += amount
+        st.peak_equity += amount
+        st.last_equity += amount
+        self.save()
+
+    def rebase(self, new_equity: float, withdrawn: float) -> None:
+        """Tras asegurar ganancias: el capital que queda pasa a ser la nueva base protegida."""
+        st = self.state
+        st.initial_capital = new_equity
+        st.day_start_equity = max(0.0, st.day_start_equity - withdrawn)
+        st.peak_equity = new_equity
+        st.last_equity = new_equity
+        st.house_money_active = False
+        st.house_money_since = None
+        self.save()
+
     def halt(self, reason: str) -> None:
         self.state.halted = True
         self.state.halt_reason = reason

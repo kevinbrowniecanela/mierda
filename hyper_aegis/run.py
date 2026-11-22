@@ -43,6 +43,7 @@ from data.market_feed import MarketFeed  # noqa: E402
 from data.news_engine import NewsEngine  # noqa: E402
 from data.stock_feed import StockData, StockFeed, StockNews  # noqa: E402
 from execution.hyperliquid_trader import HyperliquidTrader, TradeEvent  # noqa: E402
+from execution.portfolio import PortfolioManager  # noqa: E402
 from execution.risk_manager import RiskManager  # noqa: E402
 from execution.tax_exporter import TaxExporter  # noqa: E402
 from execution.watchdog import Incident, Watchdog  # noqa: E402
@@ -85,7 +86,14 @@ class HyperAegis:
         self.trader = HyperliquidTrader(settings, self.feed, self.tax)
         self.watchdog = Watchdog(settings, self.trader, self.risk, self.feed)
         self.tg = TelegramNotifier(settings, session)
-        self.dashboard = Dashboard(settings.dashboard_host, settings.dashboard_port, self.dashboard_state)
+        self.portfolio: PortfolioManager | None = None
+        if settings.portfolio_mode:
+            if settings.market != "stocks":
+                raise SystemExit("PORTFOLIO_MODE solo está disponible con MARKET=stocks (simulación).")
+            self.portfolio = PortfolioManager(settings, self.risk, self.trader)
+        self.signals_now: dict[str, str] = {}
+        self._candle_cache: dict[str, tuple[float, list]] = {}
+        self.dashboard = Dashboard(settings.dashboard_host, settings.dashboard_port, self.dashboard_state, self.candles_api)
         self.atrs: dict[str, float] = {}
         self.regimes: dict[str, str] = {}
         self.marks: dict[str, float] = {}
@@ -148,6 +156,7 @@ class HyperAegis:
         results = await asyncio.gather(*(self._analyze_coin(c) for c in coins))
         self.stats["scans"] += 1
         self.last_scan = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.signals_now = {sig.coin: sig.side for sig in results if sig}
         fresh = [sig for sig in results if sig and self._seen.get(sig.coin) != str(sig.bar_time)]
         # Primero las señales en las que coinciden más estrategias
         fresh.sort(key=lambda sg: len(sg.strategies), reverse=True)
@@ -372,9 +381,33 @@ class HyperAegis:
             for e in await self.trader.close_all(self.marks, "capital_shield"):
                 self._notify_trade_event(e)
         elif ev == "new_day":
+            if self.portfolio:
+                await self._portfolio_lock(equity)
             self.daily_summary(equity)
             await self.tax.backfill_pending()
             await self._refresh_fx()
+
+    def _core_price(self) -> float | None:
+        return self.marks.get(self.s.portfolio_core_symbol)
+
+    async def _portfolio_lock(self, equity: float) -> None:
+        free_cash = getattr(self.trader.broker, "cash", 0.0)
+        ev = self.portfolio.maybe_lock(equity, free_cash, self._core_price() or 0.0)
+        if ev:
+            self.tg.send(f"🔒 <b>Ganancias aseguradas</b>\n{ev['detail']}")
+
+    async def candles_api(self, coin: str, n: int = 120) -> list[dict]:
+        """Velas diarias completas de un activo para el panel (caché de 10 min)."""
+        cached = self._candle_cache.get(coin)
+        if cached and time.time() - cached[0] < 600:
+            rows = cached[1]
+        else:
+            df = await self.feed.candles(coin)
+            df = df.iloc[:-1] if getattr(self.feed, "partial_last_bar", True) else df
+            rows = [{"t": int(ts.timestamp()), "o": float(r.open), "h": float(r.high), "l": float(r.low), "c": float(r.close)}
+                    for ts, r in df.tail(260).iterrows()]
+            self._candle_cache[coin] = (time.time(), rows)
+        return rows[-n:]
 
     def _notify_trade_event(self, ev: TradeEvent) -> None:
         d = ev.data
@@ -462,7 +495,7 @@ class HyperAegis:
         history.append((datetime.now(timezone.utc).isoformat(timespec="seconds"), self.equity))
         return {
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "currency": "USD" if self.s.market == "stocks" else "USDC", "market": self.s.market,
+            "currency": "USD" if self.s.market == "stocks" else "USDC", "market_name": self.s.market,
             "mode": self.s.trading_mode.value, "status": status, "house_money": st.house_money_active,
             "equity": self.equity, "initial_capital": self.risk.initial, "eur_per_usd": self.eur_per_usd,
             "day_pnl": self.equity - st.day_start_equity if st.day_start_equity else 0.0,
@@ -472,6 +505,10 @@ class HyperAegis:
             "stats": {"closed": len(by_trade), "net_pnl": sum(by_trade.values()),
                       "win_rate": (sum(1 for v in by_trade.values() if v > 0) / len(by_trade) * 100) if by_trade else 0.0},
             "equity_history": history,
+            "portfolio": (self.portfolio.status(self._core_price(), self.equity) if self.portfolio else None),
+            "heatmap": [{"coin": c, "regime": self.regimes.get(c, "lateral"), "signal": self.signals_now.get(c),
+                         "change": (self.deriv.snapshots[c].change_24h if c in self.deriv.snapshots else 0.0),
+                         "held": c in self.trader.positions} for c in self.deriv.watchlist],
             "decisions": list(reversed(self._read_tail(self._decisions_path, 25))),
             "incidents": list(reversed(self.watchdog.recent(15))),
             "market": {"total": len(self.regimes), "last_scan": self.last_scan,
@@ -507,6 +544,8 @@ class HyperAegis:
         self.marks.update(await self.feed.all_mids())
         self.equity = await self.trader.equity(self.marks)
         self.risk.update_equity(self.equity)
+        if self.portfolio:
+            self.portfolio.init(self.equity)
         self.tg.startup(self.s.trading_mode.value, self.equity, self.deriv.watchlist,
                         self.s.claude_model if self.claude_on else "desactivado")
 
@@ -550,10 +589,33 @@ async def check(app: HyperAegis) -> None:
     print(f"USD->EUR {rate} ({day}, {src})")
 
 
+async def deposit_cli(app: HyperAegis, amount: float, currency: str) -> None:
+    if not app.portfolio:
+        raise SystemExit("Activa PORTFOLIO_MODE=true (con MARKET=stocks) para usar --deposit.")
+    usd = amount
+    if currency == "eur":
+        rate, day, src = await app.tax.usd_to_eur(datetime.now(timezone.utc))
+        if not rate:
+            raise SystemExit("No se pudo obtener el tipo EUR/USD del BCE; usa --currency usd.")
+        usd = amount / rate
+        print(f"{amount:.2f} EUR = {usd:.2f} USD (BCE {day}: {rate})")
+    app.feed.set_ws_coins([])
+    price = (await app.feed.all_mids()).get(app.s.portfolio_core_symbol)
+    if not price:
+        raise SystemExit(f"Sin precio de {app.s.portfolio_core_symbol}: inténtalo con el mercado abierto o más tarde.")
+    app.portfolio.init(await app.trader.equity({}))
+    ev = app.portfolio.deposit(usd, price)
+    print(f"Aportación registrada: {ev['detail']}")
+    st = app.portfolio.status(price, await app.trader.equity({}))
+    print(f"Cartera: total {st['total']:.2f} USD = núcleo {st['core_value']:.2f} + satélite {st['sleeve']:.2f} + caja {st['vault']:.2f}")
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="HyperAegis trading bot")
     parser.add_argument("--check", action="store_true", help="diagnóstico sin operar")
     parser.add_argument("--reset-shield", action="store_true", help="rearmar el Capital Shield / kill switch")
+    parser.add_argument("--deposit", type=float, help="aportación al modo cartera (parar el bot antes)")
+    parser.add_argument("--currency", choices=["eur", "usd"], default="eur", help="moneda de --deposit (por defecto eur)")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -568,6 +630,9 @@ async def main() -> None:
         app = HyperAegis(settings, session)
         if args.check:
             await check(app)
+            return
+        if args.deposit:
+            await deposit_cli(app, args.deposit, args.currency)
             return
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
