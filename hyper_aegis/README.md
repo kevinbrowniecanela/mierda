@@ -38,6 +38,28 @@ oro, índices y acciones). Opera en **velas diarias**:
 Usa el bot en `TRADING_MODE=paper` hasta que haya un sistema que supere esta validación.
 `research/next_steps.py` reproduce el análisis de riesgo, variantes y aportaciones periódicas.
 
+## Acciones de EE. UU. frente a cripto (estudio)
+
+`research/stocks_download.py`, `stocks_study.py` y `stocks_followup.py` aplican el mismo sistema diario a
+124 acciones líquidas (2010-2026, ajustadas por splits y dividendos) con costes de acciones.
+
+| | Acciones | Cripto |
+|---|---|---|
+| Volatilidad anual / rango diario | 33 % / 2,5 % | 99 % / 7,2 % |
+| Correlación media entre activos | 0,22 | 0,49 |
+| Conjunto diario, largos y cortos | +0,03R | -0,03R |
+| Solo largos | +0,16R | -0,02R |
+| Solo cortos | -0,29R | -0,04R |
+
+- Los largos de tendencia superan a entrar al azar con la misma salida (+0,16R frente a +0,135R por
+  operación; cartera 12,5 % frente a ~2,5 % anual). En cripto no hay ventaja sobre el azar.
+- Aun así, comprar y mantener SPY dio 13,3 % anual (caída 34 %) y QQQ 17,5 % (caída 35 %). El bot de
+  acciones, solo largos y con 1 % de riesgo, dio 12,5 % con caída 22 %: parecido en rentabilidad, menos
+  caída, pero con sesgo de supervivencia (Yahoo solo ofrece empresas que hoy cotizan).
+- Control sin ese sesgo, con 5 ETF: 2,3 % anual con la señal frente a 0,5 % al azar. Pocas operaciones.
+- Los picos de volumen con gran rango (huecos tras resultados) dieron +0,2R a +0,3R con solo ~190
+  operaciones; hace falta más muestra antes de fiarse.
+
 ## Estructura
 
 ```
