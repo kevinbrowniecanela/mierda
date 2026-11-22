@@ -41,6 +41,7 @@ from dashboard.server import Dashboard  # noqa: E402
 from data.derivatives_data import DerivativesData  # noqa: E402
 from data.market_feed import MarketFeed  # noqa: E402
 from data.news_engine import NewsEngine  # noqa: E402
+from data.stock_feed import StockData, StockFeed, StockNews  # noqa: E402
 from execution.hyperliquid_trader import HyperliquidTrader, TradeEvent  # noqa: E402
 from execution.risk_manager import RiskManager  # noqa: E402
 from execution.tax_exporter import TaxExporter  # noqa: E402
@@ -67,9 +68,16 @@ class HyperAegis:
     def __init__(self, settings: Settings, session: aiohttp.ClientSession):
         self.s = settings
         self.http = session
-        self.feed = MarketFeed(settings)
-        self.deriv = DerivativesData(settings, self.feed)
-        self.news = NewsEngine(settings, session)
+        if settings.market == "stocks":
+            if settings.is_live:
+                raise SystemExit("MARKET=stocks solo admite TRADING_MODE=paper: no hay broker de acciones integrado.")
+            self.feed = StockFeed(settings, session)
+            self.deriv = StockData(settings, self.feed)
+            self.news = StockNews(settings, session)
+        else:
+            self.feed = MarketFeed(settings)
+            self.deriv = DerivativesData(settings, self.feed)
+            self.news = NewsEngine(settings, session)
         self.analyst = ClaudeAnalyst(settings)
         self.claude_on = settings.claude_enabled and bool(settings.anthropic_api_key)
         self.risk = RiskManager(settings)
@@ -122,7 +130,8 @@ class HyperAegis:
     async def _analyze_coin(self, coin: str) -> Signal | None:
         try:
             df = await self.feed.candles(coin)
-            closed = df.iloc[:-1]  # la última vela de Hyperliquid está en formación
+            # En Hyperliquid la última vela está en formación; el feed de acciones ya devuelve solo velas completas
+            closed = df.iloc[:-1] if getattr(self.feed, "partial_last_bar", True) else df
             if len(closed) < 30:
                 return None
             self.atrs[coin] = float(atr_fn(closed).iloc[-1])
@@ -186,6 +195,13 @@ class HyperAegis:
             if coin in self.trader.positions:
                 self._mark_seen(sig)
                 return
+            if sig.direction < 0 and not self.s.allow_short:
+                self._mark_seen(sig)
+                self._record_decision(sig, "descartada: cortos desactivados")
+                return
+            if hasattr(self.feed, "can_trade") and not await self.feed.can_trade():
+                log.info("Señal %s en espera: mercado cerrado (%s)", coin, self.feed.market_status())
+                return  # se reintenta en el siguiente escaneo, con el mercado abierto
             if self.watchdog.entries_paused:
                 log.info("Señal %s en espera: entradas en pausa (%s)", coin, ", ".join(self.watchdog.pause_reasons))
                 return  # no se marca como vista: se reintenta cuando se levante la pausa
@@ -274,13 +290,13 @@ class HyperAegis:
                 "signal_bar_close_utc": str(sig.bar_time), "signal_close": sig.close, "price_now": price,
                 "atr_daily": sig.atr, "system_stop": stop_ref, "trend_regime": self.regimes.get(coin),
             },
-            "derivatives": None if not deriv else {
+            "derivatives": None if (not deriv or self.s.market == "stocks") else {
                 "change_24h": round(deriv.change_24h, 5), "volume_24h_usd": round(deriv.day_ntl_vlm),
                 "open_interest_usd": round(deriv.oi_usd), "oi_change_1h": self.deriv.oi_change(coin),
                 "funding_hourly": deriv.funding_hourly, "funding_annualized": round(deriv.funding_annualized, 4),
                 "funding_24h_avg": (sum(funding_24h) / len(funding_24h)) if funding_24h else None,
             },
-            "orderbook": None if not book else {"spread_bps": book.spread_bps, "imbalance_1pct": round(book.imbalance(0.01), 3)},
+            "orderbook": None if (not book or self.s.market == "stocks") else {"spread_bps": book.spread_bps, "imbalance_1pct": round(book.imbalance(0.01), 3)},
             "market_breadth": {k: sum(1 for v in self.regimes.values() if v == k) for k in ("alcista", "bajista", "lateral")},
             "account": {
                 "equity_usdc": round(equity, 2), "daily_drawdown": round(self.risk.daily_drawdown(equity), 4),
@@ -446,6 +462,7 @@ class HyperAegis:
         history.append((datetime.now(timezone.utc).isoformat(timespec="seconds"), self.equity))
         return {
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "currency": "USD" if self.s.market == "stocks" else "USDC", "market": self.s.market,
             "mode": self.s.trading_mode.value, "status": status, "house_money": st.house_money_active,
             "equity": self.equity, "initial_capital": self.risk.initial, "eur_per_usd": self.eur_per_usd,
             "day_pnl": self.equity - st.day_start_equity if st.day_start_equity else 0.0,
@@ -514,6 +531,8 @@ class HyperAegis:
 async def check(app: HyperAegis) -> None:
     """Diagnóstico sin operar."""
     s = app.s
+    if s.market == "stocks":
+        print(f"Mercado de acciones: {app.feed.market_status()} | puede operar ahora: {await app.feed.can_trade()}")
     print(f"Modo: {s.trading_mode.value} | Red: {'testnet' if s.use_testnet else 'mainnet'} | Velas: {s.candle_interval} | "
           f"Claude: {s.claude_model if app.claude_on else 'desactivado (sin clave)'}")
     wl = await app.deriv.build_watchlist()

@@ -242,7 +242,7 @@ class RiskManager:
             size = max_notional / price
         size = round_size(size, sz_decimals)
         notional = size * price
-        if size <= 0 or notional < 10.0:  # mínimo de orden de Hyperliquid: 10 USD
+        if size <= 0 or notional < self.s.min_order_usd:
             return None, f"Tamaño insuficiente (nocional {notional:.2f} USD)"
 
         tp1_dist = r * self.s.tp1_rr

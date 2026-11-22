@@ -19,7 +19,7 @@ import anthropic
 from pydantic import ValidationError
 
 from brain.schemas import TRADE_DECISION_JSON_SCHEMA, Action, Setup, TradeDecision
-from config.prompts import DIAGNOSIS_PROMPT, SYSTEM_PROMPT, build_user_prompt
+from config.prompts import DIAGNOSIS_PROMPT, build_user_prompt, get_system_prompt
 from config.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class ClaudeAnalyst:
         params: dict = dict(
             model=self.s.claude_model,
             max_tokens=self.s.claude_max_tokens,
-            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            system=[{"type": "text", "text": get_system_prompt(self.s.market), "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_prompt}],
             output_config={
                 "effort": self.s.claude_effort,

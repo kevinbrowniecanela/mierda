@@ -42,7 +42,7 @@
 <body>
 <main>
   <header>
-    <h1>HyperAegis</h1>
+    <h1>HyperAegis</h1><span id="mkt" class="pill"></span>
     <span id="mode" class="pill">…</span>
     <span id="status" class="pill">…</span>
     <span id="hm" class="pill" hidden>House Money</span>
@@ -132,27 +132,29 @@ function chart(points, base) {
 }
 
 function render(s) {
+  const CUR = s.currency || "USDC";
   const eur = s.eur_per_usd || 0, toEur = v => eur ? `${fmt(v * eur)} €` : "";
   $("mode").textContent = s.mode === "live" ? "REAL" : "SIMULACIÓN"; $("mode").className = "pill " + (s.mode === "live" ? "warn" : "");
   $("status").textContent = s.status.label; $("status").className = "pill " + s.status.level;
   $("hm").hidden = !s.house_money;
+  $("mkt").textContent = s.market === "stocks" ? "Acciones EE. UU." : "Cripto";
   $("updated").textContent = "Actualizado " + new Date(s.updated).toLocaleTimeString("es-ES");
   const pnl = s.equity - s.initial_capital, pct = pnl / s.initial_capital * 100;
   $("cards").replaceChildren(
-    card("Capital", fmt(s.equity) + " USDC", toEur(s.equity)),
-    card("Resultado total", sign(pnl) + " USDC", `${sign(pct)} % · ${toEur(pnl)}`, cls(pnl)),
-    card("Hoy", sign(s.day_pnl) + " USDC", `caída del día ${fmt(s.daily_drawdown * 100)} % (límite ${fmt(s.daily_limit * 100, 0)} %)`, cls(s.day_pnl)),
-    card("Riesgo abierto", fmt(s.open_risk) + " USDC", `${s.positions.length} de ${s.max_positions} posiciones`),
-    card("Operaciones", String(s.stats.closed), `${fmt(s.stats.win_rate, 0)} % ganadoras · neto ${sign(s.stats.net_pnl)} USDC`),
+    card("Capital", fmt(s.equity) + " " + CUR, toEur(s.equity)),
+    card("Resultado total", sign(pnl) + " " + CUR, `${sign(pct)} % · ${toEur(pnl)}`, cls(pnl)),
+    card("Hoy", sign(s.day_pnl) + " " + CUR, `caída del día ${fmt(s.daily_drawdown * 100)} % (límite ${fmt(s.daily_limit * 100, 0)} %)`, cls(s.day_pnl)),
+    card("Riesgo abierto", fmt(s.open_risk) + " " + CUR, `${s.positions.length} de ${s.max_positions} posiciones`),
+    card("Operaciones", String(s.stats.closed), `${fmt(s.stats.win_rate, 0)} % ganadoras · neto ${sign(s.stats.net_pnl)} ${CUR}`),
   );
   chart(s.equity_history.map(p => [new Date(p[0]).getTime(), p[1]]), s.initial_capital);
 
   table($("positions"), ["Activo", "Lado", "Tamaño", "Entrada", "Precio", "Stop", "Resultado", "En R", "Abierta"],
     s.positions.map(p => [p.coin, td(p.side, p.side === "LONG" ? "up" : "down"), fmt(p.size, 4), px(p.entry), px(p.mark), px(p.stop),
-      td(sign(p.upnl) + " USDC", cls(p.upnl)), td(sign(p.r) + "R", cls(p.r)), when(p.opened)]),
+      td(sign(p.upnl) + " " + CUR, cls(p.upnl)), td(sign(p.r) + "R", cls(p.r)), when(p.opened)]),
     "Sin posiciones abiertas.");
 
-  table($("trades"), ["Cierre", "Activo", "Lado", "Entrada", "Salida", "Neto USDC", "Neto €", "Motivo"],
+  table($("trades"), ["Cierre", "Activo", "Lado", "Entrada", "Salida", "Neto " + CUR, "Neto €", "Motivo"],
     s.trades.map(t => [when(t.close_time_utc), t.coin, td(t.side, t.side === "LONG" ? "up" : "down"), px(t.entry_px_usd), px(t.exit_px_usd),
       td(sign(+t.net_pnl_usd), cls(+t.net_pnl_usd)), td(sign(+t.net_pnl_eur), cls(+t.net_pnl_eur)), t.close_reason]),
     "Todavía no se ha cerrado ninguna operación.");

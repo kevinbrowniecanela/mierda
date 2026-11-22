@@ -7,6 +7,7 @@ modo por defecto es PAPER TRADING.
 
 from __future__ import annotations
 
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -24,7 +25,7 @@ class TradingMode(str, Enum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        env_file=PROJECT_ROOT / os.environ.get("ENV_FILE", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -34,6 +35,11 @@ class Settings(BaseSettings):
     # Modo de ejecución
     # ------------------------------------------------------------------ #
     trading_mode: TradingMode = TradingMode.PAPER
+    market: str = "crypto"  # "crypto" (Hyperliquid) | "stocks" (acciones EE. UU., solo simulación)
+    allow_short: bool = True  # False: descarta señales cortas (recomendado en acciones)
+    min_order_usd: float = 10.0  # nocional mínimo de una orden (10 en Hyperliquid)
+    stock_watchlist_size: int = 40
+    stock_universe_file: Path = PROJECT_ROOT / "config" / "stock_universe.txt"
     use_testnet: bool = False
 
     # ------------------------------------------------------------------ #
@@ -144,6 +150,11 @@ class Settings(BaseSettings):
     state_dir: Path = PROJECT_ROOT / "state"
     log_dir: Path = PROJECT_ROOT / "logs"
     log_level: str = "INFO"
+
+    @field_validator("state_dir", "log_dir", "tax_ledger_path", "stock_universe_file")
+    @classmethod
+    def _abs_paths(cls, v: Path) -> Path:
+        return v if v.is_absolute() else PROJECT_ROOT / v
 
     @field_validator("hl_account_address")
     @classmethod
